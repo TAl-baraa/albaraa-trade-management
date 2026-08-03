@@ -1,0 +1,21 @@
+# Project Instructions
+
+- Work incrementally and only implement explicitly requested features.
+- Do not delete or rewrite working files without a clear reason.
+- Use TypeScript with explicit, meaningful types and avoid `any`.
+- Divide the UI into small, reusable components.
+- Use English names for variables, functions, components, files, and types.
+- Use comments only when they explain non-obvious logic.
+- All user-facing interface text must be Arabic.
+- Preserve proper right-to-left layout throughout the interface.
+- The interface must be responsive on desktop and mobile.
+- Use npm only. Do not use Yarn, pnpm, or Bun.
+- Assume all commands run in Bash on Linux.
+- Use lucide-react for interface icons instead of emoji or improvised text icons.
+- Use Noto Naskh Arabic as the primary interface font.
+- Display Western Arabic numerals only: 0 1 2 3 4 5 6 7 8 9.
+- Never display Eastern Arabic numerals: ٠ ١ ٢ ٣ ٤ ٥ ٦ ٧ ٨ ٩.
+- Keep IQD and USD balances completely separate; never combine or automatically convert them.
+- Explain which files were changed after every task.
+- Run the relevant TypeScript checks and production build after every frontend change.
+- Do not add a new dependency unless necessary, and explain why it is needed.
