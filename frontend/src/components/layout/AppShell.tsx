@@ -1,4 +1,4 @@
-import { Building2, Menu, Package, Users, X } from 'lucide-react'
+import { BookOpenText, Building2, Menu, Package, Users, X } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import type { AppPage } from '../../App'
 
@@ -52,6 +52,7 @@ export function AppShell({ children, currentPage, isNavigationOpen, onNavigate, 
           <div><strong>مكتب البراء لتجارة المواد الإنشائية</strong><span>نظام إدارة التجارة</span></div>
         </div>
         <nav>
+          <button className={`nav-item ${currentPage === 'dailySales' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'dailySales' ? 'page' : undefined} onClick={() => { onNavigate('dailySales'); onNavigationClose() }}><BookOpenText size={20} /><span>السجل اليومي للمبيعات</span></button>
           <button className={`nav-item ${currentPage === 'customers' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'customers' ? 'page' : undefined} onClick={() => { onNavigate('customers'); onNavigationClose() }}><Users size={20} /><span>إدارة الزبائن</span></button>
           <button className={`nav-item ${currentPage === 'products' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'products' ? 'page' : undefined} onClick={() => { onNavigate('products'); onNavigationClose() }}><Package size={20} /><span>إدارة المنتجات</span></button>
         </nav>

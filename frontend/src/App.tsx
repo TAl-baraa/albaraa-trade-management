@@ -2,12 +2,13 @@ import { useCallback, useState } from 'react'
 import './App.css'
 import { AppShell } from './components/layout/AppShell'
 import { CustomersPage } from './pages/CustomersPage'
+import { DailySalesPage } from './pages/DailySalesPage'
 import { ProductsPage } from './pages/ProductsPage'
 
-export type AppPage = 'customers' | 'products'
+export type AppPage = 'customers' | 'products' | 'dailySales'
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<AppPage>('customers')
+  const [currentPage, setCurrentPage] = useState<AppPage>('dailySales')
   const [navigationOpen, setNavigationOpen] = useState(false)
   const closeNavigation = useCallback(() => setNavigationOpen(false), [])
 
@@ -19,7 +20,9 @@ function App() {
       onNavigationToggle={() => setNavigationOpen((open) => !open)}
       onNavigationClose={closeNavigation}
     >
-      {currentPage === 'customers' ? <CustomersPage /> : <ProductsPage />}
+      {currentPage === 'customers' && <CustomersPage />}
+      {currentPage === 'products' && <ProductsPage />}
+      {currentPage === 'dailySales' && <DailySalesPage />}
     </AppShell>
   )
 }

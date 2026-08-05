@@ -1,0 +1,25 @@
+import { FilePenLine, MoreHorizontal, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import type { Customer } from '../../types/customer'
+import type { Product } from '../../types/product'
+import type { Sale, SaleFormValues } from '../../types/sale'
+import { formatDate, formatNumber } from '../../utils/formatters'
+import { SaleRowEditor } from './SaleRowEditor'
+
+interface SalesRegisterProps { sales: Sale[]; customers: Customer[]; products: Product[]; selectedDate: string; onCreate: (values: SaleFormValues) => boolean; onUpdate: (sale: Sale, values: SaleFormValues) => boolean; onDelete: (sale: Sale) => void }
+
+const useCompactRegister = (): boolean => {
+  const [compact, setCompact] = useState(() => window.matchMedia('(max-width: 105rem)').matches)
+  useEffect(() => { const query = window.matchMedia('(max-width: 105rem)'); const update = () => setCompact(query.matches); query.addEventListener('change', update); return () => query.removeEventListener('change', update) }, [])
+  return compact
+}
+
+export function SalesRegister({ sales, customers, products, selectedDate, onCreate, onUpdate, onDelete }: SalesRegisterProps) {
+  const compact = useCompactRegister()
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
+  const editingSale = sales.find((sale) => sale.id === editingSaleId) ?? null
+  useEffect(() => { if (editingSaleId && !editingSale) setEditingSaleId(null) }, [editingSale, editingSaleId])
+  const saveEdit = (sale: Sale, values: SaleFormValues): boolean => { const saved = onUpdate(sale, values); if (saved) setEditingSaleId(null); return saved }
+  if (compact) return <section className="sales-register sales-register--cards" aria-label="سجل مبيعات اليوم"><div className="sale-cards">{sales.map((sale, index) => editingSaleId === sale.id ? <SaleRowEditor key={sale.id} variant="card" sale={sale} customers={customers} products={products} selectedDate={selectedDate} onSave={(values) => saveEdit(sale, values)} onCancel={() => setEditingSaleId(null)} /> : <article className="sale-card" key={sale.id}><header><div><span className="sequence">البيع {index + 1}</span><h2>{sale.productNameSnapshot}</h2><p>{sale.customerNameSnapshot}</p></div><MoreHorizontal size={22} /></header><dl><div><dt>الوزن</dt><dd>{formatNumber(sale.weightTons)} طن</dd></div><div><dt>السائق</dt><dd>{sale.driverName}</dd></div><div><dt>سعر بيع الطن</dt><dd>{formatNumber(sale.unitSalePrice)} {sale.saleCurrency}</dd></div><div><dt>الإجمالي</dt><dd className="sale-total">{formatNumber(sale.totalAmount)} {sale.saleCurrency}</dd></div><div><dt>التاريخ</dt><dd>{formatDate(sale.saleDate)}</dd></div></dl><footer><button className="button button--secondary button--small" type="button" disabled={editingSaleId !== null} onClick={() => setEditingSaleId(sale.id)}><FilePenLine size={17} />تعديل</button><button className="button button--secondary button--small button--text-danger" type="button" disabled={editingSaleId !== null} onClick={() => onDelete(sale)}><Trash2 size={17} />حذف</button></footer></article>)}{editingSaleId === null && <SaleRowEditor variant="card" customers={customers} products={products} selectedDate={selectedDate} onSave={onCreate} />}</div></section>
+  return <section className="sales-register" aria-label="سجل مبيعات اليوم"><div className="sales-table-wrap"><table className="sales-table"><thead><tr><th>التسلسل</th><th>الوزن (طن)</th><th>المنتج</th><th>اسم السائق</th><th>اسم المشتري</th><th>سعر بيع الطن</th><th>العملة</th><th>الإجمالي</th><th>التاريخ</th><th>الإجراءات</th></tr></thead><tbody>{sales.map((sale, index) => editingSaleId === sale.id ? <SaleRowEditor key={sale.id} variant="table" sale={sale} customers={customers} products={products} selectedDate={selectedDate} onSave={(values) => saveEdit(sale, values)} onCancel={() => setEditingSaleId(null)} /> : <tr key={sale.id}><td>{index + 1}</td><td>{formatNumber(sale.weightTons)}</td><td className="product-name">{sale.productNameSnapshot}</td><td>{sale.driverName}</td><td className="customer-name">{sale.customerNameSnapshot}</td><td>{formatNumber(sale.unitSalePrice)} {sale.saleCurrency}</td><td><span className="currency-badge">{sale.saleCurrency}</span></td><td className="sale-total">{formatNumber(sale.totalAmount)} {sale.saleCurrency}</td><td>{formatDate(sale.saleDate)}</td><td><div className="saved-sale-actions"><button className="table-action" type="button" disabled={editingSaleId !== null} onClick={() => setEditingSaleId(sale.id)}><FilePenLine size={17} />تعديل</button><button className="table-action table-action--danger" type="button" disabled={editingSaleId !== null} onClick={() => onDelete(sale)}><Trash2 size={17} />حذف</button></div></td></tr>)}{editingSaleId === null && <SaleRowEditor variant="table" customers={customers} products={products} selectedDate={selectedDate} onSave={onCreate} />}</tbody></table></div></section>
+}
