@@ -1,17 +1,20 @@
-import { Building2, Menu, Users, X } from 'lucide-react'
+import { Building2, Menu, Package, Users, X } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
+import type { AppPage } from '../../App'
 
 interface AppShellProps {
   children: ReactNode
+  currentPage: AppPage
   isNavigationOpen: boolean
+  onNavigate: (page: AppPage) => void
   onNavigationToggle: () => void
   onNavigationClose: () => void
 }
 
-export function AppShell({ children, isNavigationOpen, onNavigationToggle, onNavigationClose }: AppShellProps) {
+export function AppShell({ children, currentPage, isNavigationOpen, onNavigate, onNavigationToggle, onNavigationClose }: AppShellProps) {
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && isNavigationOpen) onNavigationClose()
+      if (event.key === 'Escape' && isNavigationOpen && !document.body.classList.contains('modal-open')) onNavigationClose()
     }
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
@@ -48,7 +51,10 @@ export function AppShell({ children, isNavigationOpen, onNavigationToggle, onNav
           <div className="sidebar-brand__icon"><Building2 size={28} /></div>
           <div><strong>مكتب البراء لتجارة المواد الإنشائية</strong><span>نظام إدارة التجارة</span></div>
         </div>
-        <nav><button className="nav-item nav-item--active" type="button" aria-current="page" onClick={onNavigationClose}><Users size={20} /><span>إدارة الزبائن</span></button></nav>
+        <nav>
+          <button className={`nav-item ${currentPage === 'customers' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'customers' ? 'page' : undefined} onClick={() => { onNavigate('customers'); onNavigationClose() }}><Users size={20} /><span>إدارة الزبائن</span></button>
+          <button className={`nav-item ${currentPage === 'products' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'products' ? 'page' : undefined} onClick={() => { onNavigate('products'); onNavigationClose() }}><Package size={20} /><span>إدارة المنتجات</span></button>
+        </nav>
       </aside>
       <main className="main-content">{children}</main>
     </div>
