@@ -7,6 +7,7 @@ import { isValidDateString } from '../../utils/date'
 import { formatNumber } from '../../utils/formatters'
 import { calculateSaleTotal, isPositiveDecimal } from '../../utils/money'
 import { PredictiveSelector } from './PredictiveSelector'
+import { MoneyInput } from '../common/MoneyInput'
 
 type FieldName = keyof SaleFormValues | 'totalAmount'
 type FormErrors = Partial<Record<FieldName, string>>
@@ -46,7 +47,7 @@ export function SaleRowEditor({ customers, products, selectedDate, sale, variant
     product: <PredictiveSelector compact label="المنتج" placeholder="ابحث عن منتج" options={activeProducts} value={values.productId} error={errors.productId} onChange={(id) => update('productId', id)} />,
     driver: input('driverName', 'اسم السائق'),
     customer: <PredictiveSelector compact label="اسم المشتري" placeholder="ابحث عن مشتري" options={activeCustomers} value={values.customerId} error={errors.customerId} onChange={(id) => update('customerId', id)} />,
-    price: input('unitSalePrice', 'سعر بيع الطن', true),
+    price: <div><MoneyInput value={values.unitSalePrice} label="سعر بيع الطن" placeholder="سعر بيع الطن" invalid={Boolean(errors.unitSalePrice)} onChange={(value) => update('unitSalePrice', value)} />{errors.unitSalePrice && <small className="field-error">{errors.unitSalePrice}</small>}</div>,
     currency: <label className="inline-field"><span className="visually-hidden">العملة</span><select aria-label="العملة" value={values.saleCurrency} onChange={(event) => update('saleCurrency', event.target.value as SaleFormValues['saleCurrency'])}><option value="IQD">IQD</option><option value="USD">USD</option></select></label>,
     total: <div className="inline-total"><output aria-label="الإجمالي المحسوب" aria-live="polite">{total === null ? '—' : `${formatNumber(total)} ${values.saleCurrency}`}</output>{errors.totalAmount && <small className="field-error">{errors.totalAmount}</small>}</div>,
     date: <label className="inline-field"><span className="visually-hidden">التاريخ</span><input type="date" value={values.saleDate} aria-invalid={Boolean(errors.saleDate)} onChange={(event) => update('saleDate', event.target.value)} />{errors.saleDate && <small className="field-error">{errors.saleDate}</small>}</label>,

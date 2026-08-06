@@ -1,4 +1,4 @@
-import { BookOpenText, Building2, Menu, Package, Users, X } from 'lucide-react'
+import { BookOpenText, Building2, Menu, Package, ReceiptText, Users, X } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import type { AppPage } from '../../App'
 
@@ -53,6 +53,7 @@ export function AppShell({ children, currentPage, isNavigationOpen, onNavigate, 
         </div>
         <nav>
           <button className={`nav-item ${currentPage === 'dailySales' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'dailySales' ? 'page' : undefined} onClick={() => { onNavigate('dailySales'); onNavigationClose() }}><BookOpenText size={20} /><span>السجل اليومي للمبيعات</span></button>
+          <button className={`nav-item ${currentPage === 'receipts' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'receipts' ? 'page' : undefined} onClick={() => { onNavigate('receipts'); onNavigationClose() }}><ReceiptText size={20} /><span>سجل الواصل</span></button>
           <button className={`nav-item ${currentPage === 'customers' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'customers' ? 'page' : undefined} onClick={() => { onNavigate('customers'); onNavigationClose() }}><Users size={20} /><span>إدارة الزبائن</span></button>
           <button className={`nav-item ${currentPage === 'products' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'products' ? 'page' : undefined} onClick={() => { onNavigate('products'); onNavigationClose() }}><Package size={20} /><span>إدارة المنتجات</span></button>
         </nav>

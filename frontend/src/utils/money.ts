@@ -1,5 +1,17 @@
 const DECIMAL_PATTERN = /^\d+(?:\.\d+)?$/
 
+export const normalizeMoneyInput = (value: string): string | null => {
+  const withoutSeparators = value.replaceAll(',', '')
+  return /^\d*(?:\.\d*)?$/.test(withoutSeparators) ? withoutSeparators : null
+}
+
+export const formatMoneyInput = (value: string): string => {
+  if (!value) return ''
+  const [integerPart, fractionPart] = value.split('.')
+  const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return fractionPart === undefined ? groupedInteger : `${groupedInteger}.${fractionPart}`
+}
+
 const parseDecimal = (value: string): { coefficient: bigint; scale: number } | null => {
   const normalized = value.trim()
   if (!DECIMAL_PATTERN.test(normalized)) return null

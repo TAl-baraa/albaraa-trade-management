@@ -14,6 +14,22 @@ export interface CustomerAccountSaleTransaction {
   transactionDate: string
   createdAt: string
   updatedAt: string
+  isActive: boolean
 }
 
-export type CustomerAccountTransaction = CustomerAccountSaleTransaction
+export interface CustomerAccountReceiptTransaction {
+  id: string
+  customerId: string
+  type: 'receipt'
+  receiptId: string
+  customerNameSnapshot: string
+  amount: number
+  currency: Currency
+  transactionDate: string
+  notes: string
+  createdAt: string
+  updatedAt: string
+  isActive: boolean
+}
+
+export type CustomerAccountTransaction = CustomerAccountSaleTransaction | CustomerAccountReceiptTransaction

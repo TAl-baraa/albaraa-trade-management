@@ -1,10 +1,10 @@
-import { customerAccountRepository } from '../repositories/customerAccountRepository'
 import { customerRepository } from '../repositories/customerRepository'
 import { productRepository } from '../repositories/productRepository'
 import { saleRepository } from '../repositories/saleRepository'
 import type { Customer } from '../types/customer'
-import type { CustomerAccountTransaction } from '../types/customerAccountTransaction'
 import type { Sale, SaleFormValues } from '../types/sale'
+import { CURRENT_ACTOR } from '../types/audit'
+import { collectChanges, createHistoryEntry } from '../utils/audit'
 import { isValidDateString } from '../utils/date'
 import { calculateSaleTotal } from '../utils/money'
 
@@ -20,26 +20,9 @@ const applyDebt = (customers: Customer[], customerId: string, currency: Sale['sa
     hasTransactionHistory: true,
   })
 
-const transactionFromSale = (sale: Sale, existing?: CustomerAccountTransaction): CustomerAccountTransaction => ({
-  id: existing?.id ?? `account-transaction-${crypto.randomUUID()}`,
-  customerId: sale.customerId,
-  type: 'sale',
-  saleId: sale.id,
-  productNameSnapshot: sale.productNameSnapshot,
-  weightTons: sale.weightTons,
-  unitSalePrice: sale.unitSalePrice,
-  currency: sale.saleCurrency,
-  totalAmount: sale.totalAmount,
-  driverName: sale.driverName,
-  transactionDate: sale.saleDate,
-  createdAt: existing?.createdAt ?? sale.createdAt,
-  updatedAt: sale.updatedAt,
-})
-
-const persistAccountingState = (sales: Sale[], customers: Customer[], transactions: CustomerAccountTransaction[]): void => {
+const persistAccountingState = (sales: Sale[], customers: Customer[]): void => {
   saleRepository.saveAll(sales)
   customerRepository.saveAll(customers)
-  customerAccountRepository.saveAll(transactions)
 }
 
 const buildSale = (values: SaleFormValues, existing?: Sale): Sale | null => {
@@ -65,6 +48,12 @@ const buildSale = (values: SaleFormValues, existing?: Sale): Sale | null => {
     saleDate: values.saleDate,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    isReviewed: existing?.isReviewed ?? false,
+    isDeleted: existing?.isDeleted ?? false,
+    deletedAt: existing?.deletedAt ?? null,
+    deletedBy: existing?.deletedBy ?? null,
+    deletionReason: existing?.deletionReason ?? null,
+    history: existing?.history ?? [],
   }
 }
 
@@ -72,39 +61,58 @@ export const salesAccountingService = {
   create(values: SaleFormValues): SalesOperationResult {
     const sale = buildSale(values)
     if (!sale) return { ok: false, message: 'تعذر حفظ البيع لأن بيانات الزبون أو المنتج لم تعد متاحة.' }
-    const sales = [sale, ...saleRepository.getAll()]
+    const created = { ...sale, history: [createHistoryEntry('created', [
+      { field: 'اسم المشتري', previousValue: null, newValue: sale.customerNameSnapshot }, { field: 'المنتج', previousValue: null, newValue: sale.productNameSnapshot },
+      { field: 'الوزن', previousValue: null, newValue: sale.weightTons }, { field: 'اسم السائق', previousValue: null, newValue: sale.driverName },
+      { field: 'سعر بيع الطن', previousValue: null, newValue: sale.unitSalePrice }, { field: 'العملة', previousValue: null, newValue: sale.saleCurrency },
+      { field: 'الإجمالي', previousValue: null, newValue: sale.totalAmount }, { field: 'التاريخ', previousValue: null, newValue: sale.saleDate },
+    ])] }
+    const sales = [created, ...saleRepository.getAll()]
     const customers = applyDebt(customerRepository.getAll(), sale.customerId, sale.saleCurrency, sale.totalAmount)
-    const transactions = [transactionFromSale(sale), ...customerAccountRepository.getAll()]
-    persistAccountingState(sales, customers, transactions)
-    return { ok: true, sale, sales, customers }
+    persistAccountingState(sales, customers)
+    return { ok: true, sale: created, sales, customers }
   },
 
   update(saleId: string, values: SaleFormValues): SalesOperationResult {
     const currentSales = saleRepository.getAll()
-    const original = currentSales.find((sale) => sale.id === saleId)
+    const original = currentSales.find((sale) => sale.id === saleId && !sale.isDeleted)
     if (!original) return { ok: false, message: 'تعذر العثور على سجل البيع المطلوب تعديله.' }
     const updated = buildSale(values, original)
     if (!updated) return { ok: false, message: 'تعذر حفظ البيع لأن بيانات الزبون أو المنتج لم تعد متاحة.' }
-    const originalTransaction = customerAccountRepository.getAll().find((transaction) => transaction.saleId === original.id)
-    if (!originalTransaction) return { ok: false, message: 'تعذر تعديل البيع لعدم وجود قيد الحساب المرتبط به.' }
     let customers = applyDebt(customerRepository.getAll(), original.customerId, original.saleCurrency, -original.totalAmount)
     customers = applyDebt(customers, updated.customerId, updated.saleCurrency, updated.totalAmount)
-    const sales = currentSales.map((sale) => sale.id === saleId ? updated : sale)
-    const transactions = customerAccountRepository.getAll().map((transaction) => transaction.saleId === saleId ? transactionFromSale(updated, transaction) : transaction)
-    persistAccountingState(sales, customers, transactions)
-    return { ok: true, sale: updated, sales, customers }
+    const changes = collectChanges(original, updated, [
+      { key: 'customerNameSnapshot', label: 'اسم المشتري' }, { key: 'productNameSnapshot', label: 'المنتج' },
+      { key: 'weightTons', label: 'الوزن' }, { key: 'driverName', label: 'اسم السائق' },
+      { key: 'unitSalePrice', label: 'سعر بيع الطن' }, { key: 'saleCurrency', label: 'العملة' },
+      { key: 'totalAmount', label: 'الإجمالي' }, { key: 'saleDate', label: 'التاريخ' },
+    ])
+    const audited = { ...updated, history: [...original.history, createHistoryEntry('updated', changes)] }
+    const sales = currentSales.map((sale) => sale.id === saleId ? audited : sale)
+    persistAccountingState(sales, customers)
+    return { ok: true, sale: audited, sales, customers }
   },
 
-  delete(saleId: string): SalesOperationResult {
+  delete(saleId: string, reason = ''): SalesOperationResult {
     const currentSales = saleRepository.getAll()
-    const original = currentSales.find((sale) => sale.id === saleId)
+    const original = currentSales.find((sale) => sale.id === saleId && !sale.isDeleted)
     if (!original) return { ok: false, message: 'تعذر العثور على سجل البيع المطلوب حذفه.' }
-    const transactions = customerAccountRepository.getAll()
-    if (!transactions.some((transaction) => transaction.saleId === saleId)) return { ok: false, message: 'تعذر حذف البيع لعدم وجود قيد الحساب المرتبط به.' }
-    const sales = currentSales.filter((sale) => sale.id !== saleId)
+    if (!reason.trim()) return { ok: false, message: 'سبب الحذف مطلوب.' }
+    const now = new Date().toISOString()
+    const deleted: Sale = { ...original, isDeleted: true, deletedAt: now, deletedBy: CURRENT_ACTOR, deletionReason: reason.trim() || null, updatedAt: now, history: [...original.history, createHistoryEntry('deleted', reason.trim() ? [{ field: 'سبب الحذف', previousValue: null, newValue: reason.trim() }] : [])] }
+    const sales = currentSales.map((sale) => sale.id === saleId ? deleted : sale)
     const customers = applyDebt(customerRepository.getAll(), original.customerId, original.saleCurrency, -original.totalAmount)
-    const remainingTransactions = transactions.filter((transaction) => transaction.saleId !== saleId)
-    persistAccountingState(sales, customers, remainingTransactions)
+    persistAccountingState(sales, customers)
     return { ok: true, sales, customers }
+  },
+
+  toggleReviewed(saleId: string): SalesOperationResult {
+    const sales = saleRepository.getAll()
+    const sale = sales.find((item) => item.id === saleId && !item.isDeleted)
+    if (!sale) return { ok: false, message: 'تعذر العثور على سجل البيع.' }
+    const updated = { ...sale, isReviewed: !sale.isReviewed, updatedAt: new Date().toISOString() }
+    const nextSales = sales.map((item) => item.id === saleId ? updated : item)
+    saleRepository.saveAll(nextSales)
+    return { ok: true, sale: updated, sales: nextSales, customers: customerRepository.getAll() }
   },
 }

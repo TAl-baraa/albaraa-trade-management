@@ -1,6 +1,7 @@
 import type { Currency } from './product'
+import type { OperationHistoryEntry, SoftDeletionMetadata } from './audit'
 
-export interface Sale {
+export interface Sale extends SoftDeletionMetadata {
   id: string
   customerId: string
   customerNameSnapshot: string
@@ -14,6 +15,8 @@ export interface Sale {
   saleDate: string
   createdAt: string
   updatedAt: string
+  isReviewed: boolean
+  history: OperationHistoryEntry[]
 }
 
 export interface SaleFormValues {

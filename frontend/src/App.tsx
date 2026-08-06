@@ -4,8 +4,9 @@ import { AppShell } from './components/layout/AppShell'
 import { CustomersPage } from './pages/CustomersPage'
 import { DailySalesPage } from './pages/DailySalesPage'
 import { ProductsPage } from './pages/ProductsPage'
+import { ReceiptRegisterPage } from './pages/ReceiptRegisterPage'
 
-export type AppPage = 'customers' | 'products' | 'dailySales'
+export type AppPage = 'customers' | 'products' | 'dailySales' | 'receipts'
 
 function App() {
   const [currentPage, setCurrentPage] = useState<AppPage>('dailySales')
@@ -23,6 +24,7 @@ function App() {
       {currentPage === 'customers' && <CustomersPage />}
       {currentPage === 'products' && <ProductsPage />}
       {currentPage === 'dailySales' && <DailySalesPage />}
+      {currentPage === 'receipts' && <ReceiptRegisterPage />}
     </AppShell>
   )
 }

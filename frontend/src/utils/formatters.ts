@@ -7,6 +7,13 @@ export const formatDate = (value: string | null): string => {
   return `${day}/${month}/${year}`
 }
 
+export const formatDateTime = (value: string | null): string => {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'short' }).format(date)
+}
+
 export const formatBalance = (balance: number, currency: 'IQD' | 'USD'): string => {
   if (balance === 0) return 'مسدد'
   const relation = balance > 0 ? 'عليه' : 'له'
