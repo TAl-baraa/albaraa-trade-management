@@ -5,11 +5,12 @@ import { CustomersPage } from './pages/CustomersPage'
 import { DailySalesPage } from './pages/DailySalesPage'
 import { ProductsPage } from './pages/ProductsPage'
 import { ReceiptRegisterPage } from './pages/ReceiptRegisterPage'
+import { DashboardPage } from './pages/DashboardPage'
 
-export type AppPage = 'customers' | 'products' | 'dailySales' | 'receipts'
+export type AppPage = 'dashboard' | 'customers' | 'products' | 'dailySales' | 'receipts'
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<AppPage>('dailySales')
+  const [currentPage, setCurrentPage] = useState<AppPage>('dashboard')
   const [navigationOpen, setNavigationOpen] = useState(false)
   const closeNavigation = useCallback(() => setNavigationOpen(false), [])
 
@@ -21,6 +22,7 @@ function App() {
       onNavigationToggle={() => setNavigationOpen((open) => !open)}
       onNavigationClose={closeNavigation}
     >
+      {currentPage === 'dashboard' && <DashboardPage />}
       {currentPage === 'customers' && <CustomersPage />}
       {currentPage === 'products' && <ProductsPage />}
       {currentPage === 'dailySales' && <DailySalesPage />}

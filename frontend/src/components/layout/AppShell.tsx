@@ -1,4 +1,4 @@
-import { BookOpenText, Building2, Menu, Package, ReceiptText, Users, X } from 'lucide-react'
+import { BookOpenText, Building2, LayoutDashboard, Menu, Package, ReceiptText, Users, X } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import type { AppPage } from '../../App'
 
@@ -52,6 +52,7 @@ export function AppShell({ children, currentPage, isNavigationOpen, onNavigate, 
           <div><strong>مكتب البراء لتجارة المواد الإنشائية</strong><span>نظام إدارة التجارة</span></div>
         </div>
         <nav>
+          <button className={`nav-item ${currentPage === 'dashboard' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'dashboard' ? 'page' : undefined} onClick={() => { onNavigate('dashboard'); onNavigationClose() }}><LayoutDashboard size={20} /><span>لوحة المتابعة</span></button>
           <button className={`nav-item ${currentPage === 'dailySales' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'dailySales' ? 'page' : undefined} onClick={() => { onNavigate('dailySales'); onNavigationClose() }}><BookOpenText size={20} /><span>السجل اليومي للمبيعات</span></button>
           <button className={`nav-item ${currentPage === 'receipts' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'receipts' ? 'page' : undefined} onClick={() => { onNavigate('receipts'); onNavigationClose() }}><ReceiptText size={20} /><span>سجل الواصل</span></button>
           <button className={`nav-item ${currentPage === 'customers' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'customers' ? 'page' : undefined} onClick={() => { onNavigate('customers'); onNavigationClose() }}><Users size={20} /><span>إدارة الزبائن</span></button>

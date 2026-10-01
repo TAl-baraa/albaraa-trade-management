@@ -29,8 +29,13 @@ const migrateSales = (version: number, data: unknown): Sale[] | null => {
 
 const storage = createVersionedStorage<Sale[]>(storageKeys.sales, storageSchemaVersions.sales, (value): value is Sale[] => Array.isArray(value) && value.every(isSale), migrateSales)
 
-export interface SaleRepository { getAll: () => Sale[]; getActive: () => Sale[]; getDeleted: () => Sale[]; saveAll: (sales: Sale[]) => void }
+export interface SaleRepository { getAll: () => Sale[]; getSnapshot: () => Sale[]; getActive: () => Sale[]; getDeleted: () => Sale[]; saveAll: (sales: Sale[]) => void }
 export const saleRepository: SaleRepository = {
+  getSnapshot: () => {
+    const result = storage.load({ persistMigration: false })
+    if (result.status === 'invalid') throw new Error('Invalid sales storage')
+    return result.status === 'valid' ? result.data : []
+  },
   getAll: () => { const result = storage.load(); if (result.status === 'valid') return result.data; storage.save([]); return [] },
   getActive: () => saleRepository.getAll().filter((sale) => !sale.isDeleted),
   getDeleted: () => saleRepository.getAll().filter((sale) => sale.isDeleted),

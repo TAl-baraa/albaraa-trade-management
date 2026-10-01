@@ -16,8 +16,13 @@ const isReceipt = (value: unknown): value is Receipt => {
 }
 const storage = createVersionedStorage<Receipt[]>(storageKeys.receipts, storageSchemaVersions.receipts, (value): value is Receipt[] => Array.isArray(value) && value.every(isReceipt))
 
-export interface ReceiptRepository { getAll: () => Receipt[]; getActive: () => Receipt[]; getDeleted: () => Receipt[]; saveAll: (receipts: Receipt[]) => void }
+export interface ReceiptRepository { getAll: () => Receipt[]; getSnapshot: () => Receipt[]; getActive: () => Receipt[]; getDeleted: () => Receipt[]; saveAll: (receipts: Receipt[]) => void }
 export const receiptRepository: ReceiptRepository = {
+  getSnapshot: () => {
+    const result = storage.load({ persistMigration: false })
+    if (result.status === 'invalid') throw new Error('Invalid receipt storage')
+    return result.status === 'valid' ? result.data : []
+  },
   getAll: () => { const result = storage.load(); if (result.status === 'valid') return result.data; storage.save([]); return [] },
   getActive: () => receiptRepository.getAll().filter((receipt) => !receipt.isDeleted),
   getDeleted: () => receiptRepository.getAll().filter((receipt) => receipt.isDeleted),

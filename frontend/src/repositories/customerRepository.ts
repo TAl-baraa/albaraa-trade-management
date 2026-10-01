@@ -18,10 +18,16 @@ const storage = createVersionedStorage<Customer[]>(storageKeys.customers, storag
 
 export interface CustomerRepository {
   getAll: () => Customer[]
+  getSnapshot: () => Customer[]
   saveAll: (customers: Customer[]) => void
 }
 
 export const customerRepository: CustomerRepository = {
+  getSnapshot: () => {
+    const result = storage.load({ persistMigration: false })
+    if (result.status === 'invalid') throw new Error('Invalid customer storage')
+    return result.status === 'valid' ? result.data : initialCustomers.map((customer) => ({ ...customer }))
+  },
   getAll: () => {
     const result = storage.load()
     if (result.status === 'valid') return result.data
