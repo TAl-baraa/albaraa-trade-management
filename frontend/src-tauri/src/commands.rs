@@ -1,4 +1,4 @@
-use crate::database::{self, customers, products, records::*};
+use crate::database::{self, customers, products, receipts, records::*, sales};
 use std::path::PathBuf;
 use tauri::State;
 
@@ -103,9 +103,100 @@ pub fn delete_customer(state: State<'_, DatabaseDirectory>, id: String) -> Repos
     customers::delete(&connect(&state)?, &id)
 }
 #[tauri::command]
-pub fn update_customer_balances(
+pub fn list_sales(state: State<'_, DatabaseDirectory>) -> RepositoryResult<Vec<Sale>> {
+    sales::list(&connect(&state)?, None)
+}
+
+#[tauri::command]
+pub fn list_sales_by_business_date(
     state: State<'_, DatabaseDirectory>,
-    updates: Vec<CustomerBalanceUpdate>,
-) -> RepositoryResult<()> {
-    customers::update_balances(&mut connect(&state)?, updates)
+    business_date: String,
+) -> RepositoryResult<Vec<Sale>> {
+    sales::list(&connect(&state)?, Some(&business_date))
+}
+
+#[tauri::command]
+pub fn get_sale(state: State<'_, DatabaseDirectory>, id: String) -> RepositoryResult<Option<Sale>> {
+    sales::get(&connect(&state)?, &id)
+}
+
+#[tauri::command]
+pub fn create_sale(
+    state: State<'_, DatabaseDirectory>,
+    input: SaleInput,
+) -> RepositoryResult<SalesMutation> {
+    sales::create(&mut connect(&state)?, input)
+}
+
+#[tauri::command]
+pub fn update_sale(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+    input: SaleInput,
+) -> RepositoryResult<SalesMutation> {
+    sales::update(&mut connect(&state)?, &id, input)
+}
+
+#[tauri::command]
+pub fn soft_delete_sale(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+    reason: String,
+) -> RepositoryResult<SalesMutation> {
+    sales::soft_delete(&mut connect(&state)?, &id, &reason)
+}
+
+#[tauri::command]
+pub fn toggle_sale_reviewed(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+) -> RepositoryResult<SalesMutation> {
+    sales::toggle_reviewed(&mut connect(&state)?, &id)
+}
+
+#[tauri::command]
+pub fn list_receipts(state: State<'_, DatabaseDirectory>) -> RepositoryResult<Vec<Receipt>> {
+    receipts::list(&connect(&state)?, None)
+}
+
+#[tauri::command]
+pub fn list_receipts_by_business_date(
+    state: State<'_, DatabaseDirectory>,
+    business_date: String,
+) -> RepositoryResult<Vec<Receipt>> {
+    receipts::list(&connect(&state)?, Some(&business_date))
+}
+
+#[tauri::command]
+pub fn get_receipt(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+) -> RepositoryResult<Option<Receipt>> {
+    receipts::get(&connect(&state)?, &id)
+}
+
+#[tauri::command]
+pub fn create_receipt(
+    state: State<'_, DatabaseDirectory>,
+    input: ReceiptInput,
+) -> RepositoryResult<ReceiptMutation> {
+    receipts::create(&mut connect(&state)?, input)
+}
+
+#[tauri::command]
+pub fn update_receipt(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+    input: ReceiptInput,
+) -> RepositoryResult<ReceiptMutation> {
+    receipts::update(&mut connect(&state)?, &id, input)
+}
+
+#[tauri::command]
+pub fn soft_delete_receipt(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+    reason: String,
+) -> RepositoryResult<ReceiptMutation> {
+    receipts::soft_delete(&mut connect(&state)?, &id, &reason)
 }

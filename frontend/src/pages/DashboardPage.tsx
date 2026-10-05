@@ -17,7 +17,7 @@ type DashboardState = { ok: true; summary: DashboardSummary } | { ok: false }
 
 const loadDashboard = async (): Promise<DashboardState> => {
   try {
-    return { ok: true, summary: buildDashboardSummary(await customerRepository.getAll(), saleRepository.getSnapshot(), receiptRepository.getSnapshot(), getLocalDateString()) }
+    return { ok: true, summary: buildDashboardSummary(await customerRepository.getAll(), await saleRepository.getAll(), await receiptRepository.getAll(), getLocalDateString()) }
   } catch {
     return { ok: false }
   }
@@ -32,9 +32,8 @@ export function DashboardPage() {
     const reload = async () => { const next = await loadDashboard(); if (active) { setState(next); setLoading(false) } }
     void reload()
     window.addEventListener('focus', reload)
-    window.addEventListener('storage', reload)
     const interval = window.setInterval(reload, 60_000)
-    return () => { active = false; window.removeEventListener('focus', reload); window.removeEventListener('storage', reload); window.clearInterval(interval) }
+    return () => { active = false; window.removeEventListener('focus', reload); window.clearInterval(interval) }
   }, [])
 
   return <div className="page-container dashboard-page">

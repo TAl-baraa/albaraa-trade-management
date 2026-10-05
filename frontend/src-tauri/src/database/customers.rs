@@ -1,5 +1,5 @@
 use super::records::*;
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 pub fn list(connection: &Connection, archived: Option<bool>) -> RepositoryResult<Vec<Customer>> {
     let mut statement = connection.prepare("SELECT * FROM customers WHERE (?1 IS NULL OR is_archived = ?1) ORDER BY created_at DESC, rowid DESC").map_err(database_error)?;
@@ -63,22 +63,4 @@ pub fn delete(connection: &Connection, id: &str) -> RepositoryResult<()> {
     } else {
         Err("لا يمكن حذف زبون له رصيد أو سجل معاملات.".into())
     }
-}
-
-/// Temporary bridge: legacy transaction calculations remain in TypeScript.
-/// Only balance/history fields are writable here, and stale balance writes fail atomically.
-pub fn update_balances(
-    connection: &mut Connection,
-    updates: Vec<CustomerBalanceUpdate>,
-) -> RepositoryResult<()> {
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(database_error)?;
-    for update in updates {
-        let count = transaction.execute(&format!("UPDATE customers SET iqd_balance_minor=?2, usd_balance_minor=?3, has_transaction_history=MAX(has_transaction_history, ?4), updated_at={NOW} WHERE id=?1 AND iqd_balance_minor=?5 AND usd_balance_minor=?6"), params![update.id, money_minor(update.iqd_balance)?, money_minor(update.usd_balance)?, update.has_transaction_history, money_minor(update.expected_iqd_balance)?, money_minor(update.expected_usd_balance)?]).map_err(database_error)?;
-        if count != 1 {
-            return Err("تغير رصيد الزبون. حدّث الصفحة وأعد المحاولة.".into());
-        }
-    }
-    transaction.commit().map_err(database_error)
 }

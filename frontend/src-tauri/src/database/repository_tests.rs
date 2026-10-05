@@ -1,4 +1,4 @@
-use super::{customers, initialize, products, records::*};
+use super::{customers, initialize, products, receipts, records::*, sales};
 use std::{
     fs,
     path::PathBuf,
@@ -41,6 +41,49 @@ fn product_input(name: &str) -> ProductInput {
         name: name.into(),
         notes: "ملاحظة المنتج".into(),
     }
+}
+
+fn sale_input(
+    customer_id: &str,
+    product_id: &str,
+    weight: &str,
+    price: &str,
+    currency: &str,
+) -> SaleInput {
+    SaleInput {
+        customer_id: customer_id.into(),
+        product_id: product_id.into(),
+        weight_tons: weight.into(),
+        driver_name: "سائق الاختبار".into(),
+        unit_sale_price: price.into(),
+        sale_currency: currency.into(),
+        total_amount: {
+            let weight: f64 = weight.parse().unwrap();
+            let price: f64 = price.parse().unwrap();
+            (weight * price * 100.0).round() / 100.0
+        },
+        sale_date: "2026-10-05".into(),
+    }
+}
+
+fn receipt_input(customer_id: &str, amount: &str, currency: &str) -> ReceiptInput {
+    ReceiptInput {
+        customer_id: customer_id.into(),
+        amount: amount.into(),
+        currency: currency.into(),
+        business_date: "2026-10-05".into(),
+        notes: "ملاحظة الواصل".into(),
+    }
+}
+
+fn balances(connection: &rusqlite::Connection, customer_id: &str) -> (i64, i64) {
+    connection
+        .query_row(
+            "SELECT iqd_balance_minor, usd_balance_minor FROM customers WHERE id=?1",
+            [customer_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
 }
 
 #[test]
@@ -147,43 +190,388 @@ fn product_lifecycle_normalized_uniqueness_and_restart() {
 }
 
 #[test]
-fn invalid_values_and_legacy_balance_integrity() {
+fn invalid_customer_and_product_values_are_rejected() {
     let directory = TestDirectory::new();
-    let mut connection = initialize(&directory.0).unwrap();
+    let connection = initialize(&directory.0).unwrap();
     for invalid in [f64::NAN, f64::INFINITY, 1e20] {
         let mut input = customer_input();
         input.iqd_balance = invalid;
         assert!(customers::save(&connection, None, input).is_err());
     }
     assert!(products::save(&connection, None, product_input("  ")).is_err());
+}
+
+#[test]
+fn sales_atomic_lifecycle_snapshots_and_restart() {
+    let directory = TestDirectory::new();
+    let mut connection = initialize(&directory.0).unwrap();
+    assert!(sales::list(&connection, None).unwrap().is_empty());
+
+    let first_customer = customers::save(&connection, None, customer_input()).unwrap();
+    let mut second_customer_input = customer_input();
+    second_customer_input.name = "زبون ثانٍ".into();
+    let second_customer = customers::save(&connection, None, second_customer_input).unwrap();
+    let first_product = products::save(&connection, None, product_input("منتج أول")).unwrap();
+    let second_product = products::save(&connection, None, product_input("منتج ثانٍ")).unwrap();
+
+    let created_iqd = sales::create(
+        &mut connection,
+        sale_input(&first_customer.id, &first_product.id, "2", "100", "IQD"),
+    )
+    .unwrap()
+    .sale
+    .unwrap();
+    assert_eq!(created_iqd.total_amount, 200.0);
+    assert_eq!(balances(&connection, &first_customer.id), (20_000, 0));
+    assert_eq!(created_iqd.history.len(), 1);
+    assert_eq!(created_iqd.history[0].operation_type, "created");
+
+    let created_usd = sales::create(
+        &mut connection,
+        sale_input(&first_customer.id, &first_product.id, "1.5", "10", "USD"),
+    )
+    .unwrap()
+    .sale
+    .unwrap();
+    assert_eq!(balances(&connection, &first_customer.id), (20_000, 1_500));
+
+    let changed_amount = sales::update(
+        &mut connection,
+        &created_iqd.id,
+        sale_input(&first_customer.id, &first_product.id, "3", "100", "IQD"),
+    )
+    .unwrap()
+    .sale
+    .unwrap();
+    assert_eq!(changed_amount.total_amount, 300.0);
+    assert_eq!(balances(&connection, &first_customer.id), (30_000, 1_500));
+
+    sales::update(
+        &mut connection,
+        &created_iqd.id,
+        sale_input(&first_customer.id, &first_product.id, "3", "100", "USD"),
+    )
+    .unwrap();
+    assert_eq!(balances(&connection, &first_customer.id), (0, 31_500));
+
+    let changed_links = sales::update(
+        &mut connection,
+        &created_iqd.id,
+        sale_input(&second_customer.id, &second_product.id, "3", "100", "USD"),
+    )
+    .unwrap()
+    .sale
+    .unwrap();
+    assert_eq!(balances(&connection, &first_customer.id), (0, 1_500));
+    assert_eq!(balances(&connection, &second_customer.id), (0, 30_000));
+    assert_eq!(changed_links.customer_name_snapshot, "زبون ثانٍ");
+    assert_eq!(changed_links.product_name_snapshot, "منتج ثانٍ");
+
+    let mut renamed_customer = customer_input();
+    renamed_customer.name = "اسم زبون جديد".into();
+    renamed_customer.usd_balance = 300.0;
+    customers::save(&connection, Some(&second_customer.id), renamed_customer).unwrap();
+    products::save(
+        &connection,
+        Some(&second_product.id),
+        product_input("اسم منتج جديد"),
+    )
+    .unwrap();
+    let mut unrelated = sale_input(&second_customer.id, &second_product.id, "3", "100", "USD");
+    unrelated.driver_name = "سائق جديد".into();
+    unrelated.sale_date = "2026-10-06".into();
+    let stable_snapshots = sales::update(&mut connection, &created_iqd.id, unrelated)
+        .unwrap()
+        .sale
+        .unwrap();
+    assert_eq!(stable_snapshots.customer_name_snapshot, "زبون ثانٍ");
+    assert_eq!(stable_snapshots.product_name_snapshot, "منتج ثانٍ");
+    assert_eq!(
+        sales::list(&connection, Some("2026-10-06")).unwrap().len(),
+        1
+    );
+
+    let deleted = sales::soft_delete(&mut connection, &created_iqd.id, "اختبار الحذف")
+        .unwrap()
+        .sale
+        .unwrap();
+    assert!(deleted.is_deleted);
+    assert_eq!(deleted.deletion_reason.as_deref(), Some("اختبار الحذف"));
+    assert_eq!(balances(&connection, &second_customer.id), (0, 0));
+    assert_eq!(deleted.history.last().unwrap().operation_type, "deleted");
+    assert_eq!(balances(&connection, &first_customer.id), (0, 1_500));
+
+    let reviewed = sales::toggle_reviewed(&mut connection, &created_usd.id)
+        .unwrap()
+        .sale
+        .unwrap();
+    assert!(reviewed.is_reviewed);
+    assert!(sales::toggle_reviewed(&mut connection, &created_iqd.id).is_err());
+
+    let integrity: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    let foreign_key_violations: i64 = connection
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(foreign_key_violations, 0);
+    drop(connection);
+
+    let connection = initialize(&directory.0).unwrap();
+    let persisted = sales::get(&connection, &created_iqd.id).unwrap().unwrap();
+    assert!(persisted.is_deleted);
+    assert_eq!(sales::list(&connection, None).unwrap().len(), 2);
+    assert_eq!(balances(&connection, &first_customer.id), (0, 1_500));
+    assert_eq!(balances(&connection, &second_customer.id), (0, 0));
+}
+
+#[test]
+fn sale_failures_roll_back_record_balance_and_history() {
+    let directory = TestDirectory::new();
+    let mut connection = initialize(&directory.0).unwrap();
     let customer = customers::save(&connection, None, customer_input()).unwrap();
-    let update = |expected: f64, next: f64, history: bool| CustomerBalanceUpdate {
-        id: customer.id.clone(),
-        expected_iqd_balance: expected,
-        expected_usd_balance: 0.0,
-        iqd_balance: next,
-        usd_balance: 0.0,
-        has_transaction_history: history,
-    };
-    customers::update_balances(&mut connection, vec![update(0.0, 125.5, true)]).unwrap();
+    let product = products::save(&connection, None, product_input("منتج")).unwrap();
+
+    let mut inconsistent = sale_input(&customer.id, &product.id, "2", "10", "IQD");
+    inconsistent.total_amount = 19.0;
+    assert!(sales::create(&mut connection, inconsistent).is_err());
     assert!(
-        customers::update_balances(
+        sales::create(
             &mut connection,
-            vec![update(125.5, 200.0, true), update(0.0, 300.0, true)]
+            sale_input(&customer.id, "missing", "2", "10", "IQD")
         )
         .is_err()
     );
-    assert_eq!(
-        customers::get(&connection, &customer.id)
-            .unwrap()
-            .unwrap()
-            .iqd_balance,
-        125.5
+    assert!(sales::list(&connection, None).unwrap().is_empty());
+    assert_eq!(balances(&connection, &customer.id), (0, 0));
+
+    connection.execute_batch("CREATE TRIGGER fail_sale_history BEFORE INSERT ON operation_history WHEN NEW.sale_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'test rollback'); END;").unwrap();
+    assert!(
+        sales::create(
+            &mut connection,
+            sale_input(&customer.id, &product.id, "2", "10", "IQD")
+        )
+        .is_err()
     );
-    customers::update_balances(&mut connection, vec![update(125.5, 0.0, false)]).unwrap();
-    let retained = customers::get(&connection, &customer.id).unwrap().unwrap();
-    assert!(retained.has_transaction_history);
-    assert_eq!(retained.usd_balance, 0.0);
-    assert!(customers::delete(&connection, &customer.id).is_err());
-    assert!(customers::set_archived(&connection, &customer.id, true).is_ok());
+    assert!(sales::list(&connection, None).unwrap().is_empty());
+    assert_eq!(balances(&connection, &customer.id), (0, 0));
+    let history_count: i64 = connection
+        .query_row("SELECT count(*) FROM operation_history", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(history_count, 0);
+
+    connection
+        .execute_batch("DROP TRIGGER fail_sale_history;")
+        .unwrap();
+    let created = sales::create(
+        &mut connection,
+        sale_input(&customer.id, &product.id, "2", "10", "IQD"),
+    )
+    .unwrap()
+    .sale
+    .unwrap();
+    connection.execute_batch("CREATE TRIGGER fail_sale_update_history BEFORE INSERT ON operation_history WHEN NEW.operation_type = 'updated' BEGIN SELECT RAISE(ABORT, 'test update rollback'); END;").unwrap();
+    assert!(
+        sales::update(
+            &mut connection,
+            &created.id,
+            sale_input(&customer.id, &product.id, "3", "10", "IQD")
+        )
+        .is_err()
+    );
+    let unchanged = sales::get(&connection, &created.id).unwrap().unwrap();
+    assert_eq!(unchanged.total_amount, 20.0);
+    assert_eq!(unchanged.history.len(), 1);
+    assert_eq!(balances(&connection, &customer.id), (2_000, 0));
+}
+
+#[test]
+fn receipts_atomic_lifecycle_overpayment_snapshots_and_restart() {
+    let directory = TestDirectory::new();
+    let mut connection = initialize(&directory.0).unwrap();
+    assert!(receipts::list(&connection, None).unwrap().is_empty());
+
+    let mut first_input = customer_input();
+    first_input.iqd_balance = 100.0;
+    first_input.usd_balance = 50.0;
+    let first_customer = customers::save(&connection, None, first_input).unwrap();
+    let mut second_input = customer_input();
+    second_input.name = "زبون الواصل الثاني".into();
+    let second_customer = customers::save(&connection, None, second_input).unwrap();
+
+    let created_iqd = receipts::create(
+        &mut connection,
+        receipt_input(&first_customer.id, "125", "IQD"),
+    )
+    .unwrap()
+    .receipt
+    .unwrap();
+    assert_eq!(created_iqd.amount, 125.0);
+    assert_eq!(balances(&connection, &first_customer.id), (-2_500, 5_000));
+    assert_eq!(created_iqd.history.len(), 1);
+    assert_eq!(created_iqd.history[0].operation_type, "created");
+
+    let created_usd = receipts::create(
+        &mut connection,
+        receipt_input(&first_customer.id, "10", "USD"),
+    )
+    .unwrap()
+    .receipt
+    .unwrap();
+    assert_eq!(created_usd.amount, 10.0);
+    assert_eq!(balances(&connection, &first_customer.id), (-2_500, 4_000));
+
+    receipts::update(
+        &mut connection,
+        &created_iqd.id,
+        receipt_input(&first_customer.id, "150", "IQD"),
+    )
+    .unwrap();
+    assert_eq!(balances(&connection, &first_customer.id), (-5_000, 4_000));
+
+    receipts::update(
+        &mut connection,
+        &created_iqd.id,
+        receipt_input(&first_customer.id, "150", "USD"),
+    )
+    .unwrap();
+    assert_eq!(balances(&connection, &first_customer.id), (10_000, -11_000));
+
+    let changed_customer = receipts::update(
+        &mut connection,
+        &created_iqd.id,
+        receipt_input(&second_customer.id, "150", "USD"),
+    )
+    .unwrap()
+    .receipt
+    .unwrap();
+    assert_eq!(balances(&connection, &first_customer.id), (10_000, 4_000));
+    assert_eq!(balances(&connection, &second_customer.id), (0, -15_000));
+    assert_eq!(
+        changed_customer.customer_name_snapshot,
+        "زبون الواصل الثاني"
+    );
+
+    let mut renamed = customer_input();
+    renamed.name = "اسم زبون واصل جديد".into();
+    renamed.usd_balance = -150.0;
+    customers::save(&connection, Some(&second_customer.id), renamed).unwrap();
+    let mut unrelated = receipt_input(&second_customer.id, "150", "USD");
+    unrelated.business_date = "2026-10-06".into();
+    unrelated.notes = "ملاحظة معدلة".into();
+    let stable_snapshot = receipts::update(&mut connection, &created_iqd.id, unrelated)
+        .unwrap()
+        .receipt
+        .unwrap();
+    assert_eq!(stable_snapshot.customer_name_snapshot, "زبون الواصل الثاني");
+    assert_eq!(stable_snapshot.notes, "ملاحظة معدلة");
+    assert_eq!(
+        receipts::list(&connection, Some("2026-10-06"))
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let deleted = receipts::soft_delete(&mut connection, &created_iqd.id, "اختبار الحذف")
+        .unwrap()
+        .receipt
+        .unwrap();
+    assert!(deleted.is_deleted);
+    assert_eq!(deleted.deletion_reason.as_deref(), Some("اختبار الحذف"));
+    assert_eq!(balances(&connection, &second_customer.id), (0, 0));
+    assert_eq!(balances(&connection, &first_customer.id), (10_000, 4_000));
+    assert_eq!(deleted.history.last().unwrap().operation_type, "deleted");
+
+    let mut archived_input = customer_input();
+    archived_input.name = "زبون مؤرشف".into();
+    archived_input.iqd_balance = 100.0;
+    let archived_customer = customers::save(&connection, None, archived_input).unwrap();
+    let archived_receipt = receipts::create(
+        &mut connection,
+        receipt_input(&archived_customer.id, "100", "IQD"),
+    )
+    .unwrap()
+    .receipt
+    .unwrap();
+    customers::set_archived(&connection, &archived_customer.id, true).unwrap();
+    let mut archived_edit = receipt_input(&archived_customer.id, "100", "IQD");
+    archived_edit.notes = "تعديل مرجع مؤرشف".into();
+    let archived_updated = receipts::update(&mut connection, &archived_receipt.id, archived_edit)
+        .unwrap()
+        .receipt
+        .unwrap();
+    assert_eq!(archived_updated.customer_name_snapshot, "زبون مؤرشف");
+    assert_eq!(balances(&connection, &archived_customer.id), (0, 0));
+
+    let audit_count: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM operation_history WHERE receipt_id IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(audit_count >= 8);
+    let integrity: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    let foreign_key_violations: i64 = connection
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(foreign_key_violations, 0);
+    drop(connection);
+
+    let connection = initialize(&directory.0).unwrap();
+    assert_eq!(receipts::list(&connection, None).unwrap().len(), 3);
+    assert!(
+        receipts::get(&connection, &created_iqd.id)
+            .unwrap()
+            .unwrap()
+            .is_deleted
+    );
+    assert_eq!(balances(&connection, &first_customer.id), (10_000, 4_000));
+    assert_eq!(balances(&connection, &second_customer.id), (0, 0));
+}
+
+#[test]
+fn receipt_failures_roll_back_record_balance_and_history() {
+    let directory = TestDirectory::new();
+    let mut connection = initialize(&directory.0).unwrap();
+    let customer = customers::save(&connection, None, customer_input()).unwrap();
+    assert!(receipts::create(&mut connection, receipt_input("missing", "10", "IQD")).is_err());
+    assert!(receipts::create(&mut connection, receipt_input(&customer.id, "0", "IQD")).is_err());
+    assert!(receipts::create(&mut connection, receipt_input(&customer.id, "10", "EUR")).is_err());
+
+    connection.execute_batch("CREATE TRIGGER fail_receipt_history BEFORE INSERT ON operation_history WHEN NEW.receipt_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'test rollback'); END;").unwrap();
+    assert!(receipts::create(&mut connection, receipt_input(&customer.id, "25", "IQD")).is_err());
+    assert!(receipts::list(&connection, None).unwrap().is_empty());
+    assert_eq!(balances(&connection, &customer.id), (0, 0));
+    connection
+        .execute_batch("DROP TRIGGER fail_receipt_history;")
+        .unwrap();
+
+    let created = receipts::create(&mut connection, receipt_input(&customer.id, "25", "IQD"))
+        .unwrap()
+        .receipt
+        .unwrap();
+    connection.execute_batch("CREATE TRIGGER fail_receipt_update_history BEFORE INSERT ON operation_history WHEN NEW.operation_type = 'updated' BEGIN SELECT RAISE(ABORT, 'test update rollback'); END;").unwrap();
+    assert!(
+        receipts::update(
+            &mut connection,
+            &created.id,
+            receipt_input(&customer.id, "40", "IQD")
+        )
+        .is_err()
+    );
+    let unchanged = receipts::get(&connection, &created.id).unwrap().unwrap();
+    assert_eq!(unchanged.amount, 25.0);
+    assert_eq!(unchanged.history.len(), 1);
+    assert_eq!(balances(&connection, &customer.id), (-2_500, 0));
 }

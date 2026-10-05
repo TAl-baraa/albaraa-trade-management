@@ -1,9 +1,11 @@
 use rusqlite::{Connection, TransactionBehavior};
 pub mod customers;
 pub mod products;
+pub mod receipts;
 pub mod records;
 #[cfg(test)]
 mod repository_tests;
+pub mod sales;
 use std::{error::Error, fs, io, path::Path, time::Duration};
 
 const SCHEMA_VERSION: i64 = 2;

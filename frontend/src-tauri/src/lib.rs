@@ -20,7 +20,19 @@ pub fn run() {
             commands::archive_product,
             commands::reactivate_product,
             commands::delete_customer,
-            commands::update_customer_balances
+            commands::list_sales,
+            commands::list_sales_by_business_date,
+            commands::get_sale,
+            commands::create_sale,
+            commands::update_sale,
+            commands::soft_delete_sale,
+            commands::toggle_sale_reviewed,
+            commands::list_receipts,
+            commands::list_receipts_by_business_date,
+            commands::get_receipt,
+            commands::create_receipt,
+            commands::update_receipt,
+            commands::soft_delete_receipt
         ])
         .setup(|app| {
             let directory = app.path().app_data_dir()?;

@@ -18,12 +18,10 @@ dependencies.
 `npm run tauri -- build` runs `npm run build`, embeds `../dist`, and builds an
 NSIS installer. The included icons are the default Tauri placeholder icons.
 
-Customers and products now use SQLite through typed Tauri commands exclusively.
+Customers, products, sales and receipts use SQLite through typed Tauri commands exclusively.
 Browser-only development displays an Arabic desktop-app requirement instead of
-falling back to localStorage. Sales and receipts still use their existing
-localStorage repositories. WebView2, browser development and packaged origins
-have separate storage profiles; none of their old customer/product test data is
-imported. Authentication and backups are not implemented.
+falling back to localStorage. Existing browser business data is disposable and is
+not imported. Authentication and backups are not implemented.
 
 ## SQLite infrastructure (schema version 2)
 
@@ -92,10 +90,8 @@ than silently replacing data. Failed schema creation rolls back.
 
 Only schema metadata is seeded. All five business/history tables start empty.
 Customer mock data is not imported by the runtime, and obsolete product mocks were
-removed. Existing customer/product localStorage keys are ignored and never written. Sales and
-receipts still temporarily read/write localStorage; old test transactions can
-therefore reference missing customers/products. Their snapshots still display,
-but they are not imported or matched to newly created SQLite records.
+removed. Existing customer/product/sales/receipt localStorage data is ignored and
+never written. No business repository retains browser-storage persistence.
 
 Validation from `frontend/src-tauri`:
 
@@ -123,7 +119,10 @@ exposed to the webview.
 - `create_product`, `update_product`: editable product fields only.
 - `archive_customer`, `reactivate_customer`, `delete_customer`.
 - `archive_product`, `reactivate_product`.
-- `update_customer_balances`: temporary legacy-accounting bridge described below.
+- `list_sales`, `list_sales_by_business_date`, `get_sale`.
+- `create_sale`, `update_sale`, `soft_delete_sale`, `toggle_sale_reviewed`.
+- `list_receipts`, `list_receipts_by_business_date`, `get_receipt`.
+- `create_receipt`, `update_receipt`, `soft_delete_receipt`.
 
 Rust creates IDs and UTC timestamps. Updates preserve creation timestamps,
 archive state and historical customer fields. Customer balances use the existing
@@ -140,30 +139,21 @@ Products do not have currency or rate validation. Sales/receipts retain their
 existing currency rules and SQLite currency CHECK constraints.
 
 New dependencies are the official `@tauri-apps/api` for supported IPC, direct
-`serde` derive support for command DTOs (already present transitively), and
+`serde` and `serde_json` support for command and audit DTOs, and
 `unicode-normalization` so the backend can enforce NFKC uniqueness independently
 of the browser. The sales-only product cleanup adds no further dependencies.
 
-## Temporary Sales/Receipts compatibility
+## Atomic Sales and Receipts
 
-Accounting formulas, transaction repositories and transaction storage formats
-are unchanged. Their callers now await SQLite customer/product lookups. Legacy
-operations are serialized within the current webview, and their existing
-calculated balances are persisted through `update_customer_balances`.
-That command only updates balances and the sticky history flag; it does not
-replace customer profiles, delete records or write transactions to SQLite.
-All balance updates for one operation are one SQLite transaction, with expected
-previous balances checked to reject stale updates. If that command fails, the
-service attempts to restore its previous localStorage transaction list.
+Sales creation, updates and soft deletion are native SQLite transactions. Rust
+validates references, currency, positive decimal inputs, dates and the calculated
+total. It writes the sale, customer balance and audit history together. Updates
+reverse the original effect before applying the replacement. Unrelated edits
+preserve stored customer and product name snapshots.
 
-This is **not an atomic transaction across the two stores**: a crash between the
-localStorage write and SQLite write can leave them inconsistent. Serialization
-does not coordinate multiple app processes. Rust cannot inspect WebView
-localStorage references, so customer deletion also checks legacy sales/receipts
-in TypeScript. Newly performed legacy operations set the SQLite history flag;
-the server cannot independently verify old browser history. Do not treat this
-intermediate phase as production-ready accounting or switch origins with test
-balances that depend on legacy transactions. No old test data is migrated.
-
-The next step is to move sales/receipts and their balance/history writes into
-single native SQLite transactions and remove this temporary bridge.
+Receipt creation, updates and soft deletion follow the same transaction boundary.
+Receipt creation subtracts the amount and permits negative customer balances as
+credit. Updates reverse the original effect before applying the replacement, and
+deletion restores the original amount. Customer deletion relies on SQLite foreign
+keys and history checks. The legacy accounting bridge and browser-storage
+repositories have been removed. No old test data is migrated.

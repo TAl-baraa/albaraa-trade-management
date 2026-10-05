@@ -77,17 +77,6 @@ impl Customer {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CustomerBalanceUpdate {
-    pub id: String,
-    pub expected_iqd_balance: f64,
-    pub expected_usd_balance: f64,
-    pub iqd_balance: f64,
-    pub usd_balance: f64,
-    pub has_transaction_history: bool,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductInput {
@@ -116,4 +105,105 @@ impl Product {
             updated_at: row.get("updated_at")?,
         })
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuditFieldChange {
+    pub field: String,
+    pub previous_value: serde_json::Value,
+    pub new_value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationHistoryEntry {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub operation_type: String,
+    pub actor: String,
+    pub changed_at: String,
+    pub changes: Vec<AuditFieldChange>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaleInput {
+    pub customer_id: String,
+    pub product_id: String,
+    pub weight_tons: String,
+    pub driver_name: String,
+    pub unit_sale_price: String,
+    pub sale_currency: String,
+    pub total_amount: f64,
+    pub sale_date: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Sale {
+    pub id: String,
+    pub customer_id: String,
+    pub customer_name_snapshot: String,
+    pub product_id: String,
+    pub product_name_snapshot: String,
+    pub weight_tons: f64,
+    pub driver_name: String,
+    pub unit_sale_price: f64,
+    pub sale_currency: String,
+    pub total_amount: f64,
+    pub sale_date: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub is_reviewed: bool,
+    pub is_deleted: bool,
+    pub deleted_at: Option<String>,
+    pub deleted_by: Option<String>,
+    pub deletion_reason: Option<String>,
+    pub history: Vec<OperationHistoryEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SalesMutation {
+    pub sale: Option<Sale>,
+    pub sales: Vec<Sale>,
+    pub customers: Vec<Customer>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReceiptInput {
+    pub customer_id: String,
+    pub amount: String,
+    pub currency: String,
+    pub business_date: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Receipt {
+    pub id: String,
+    pub customer_id: String,
+    pub customer_name_snapshot: String,
+    pub amount: f64,
+    pub currency: String,
+    pub business_date: String,
+    pub notes: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub is_deleted: bool,
+    pub deleted_at: Option<String>,
+    pub deleted_by: Option<String>,
+    pub deletion_reason: Option<String>,
+    pub history: Vec<OperationHistoryEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptMutation {
+    pub receipt: Option<Receipt>,
+    pub receipts: Vec<Receipt>,
+    pub customers: Vec<Customer>,
 }

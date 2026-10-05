@@ -19,7 +19,7 @@ import { formatDate, formatNumber } from '../utils/formatters'
 export function DailySalesPage() {
   const today = getLocalDateString()
   const [selectedDate, setSelectedDate] = useState(today)
-  const [sales, setSales] = useState<Sale[]>(() => saleRepository.getAll())
+  const { items: sales, setItems: setSales, loading: salesLoading, error: salesError, reload: reloadSales } = useRepositoryList(saleRepository.getAll)
   const { items: customers, setItems: setCustomers, loading, error, reload } = useRepositoryList(customerRepository.getAll)
   const { items: products, loading: productsLoading, error: productsError, reload: reloadProducts } = useRepositoryList(productRepository.getAll)
   const [deletingSale, setDeletingSale] = useState<Sale | null>(null)
@@ -54,7 +54,7 @@ export function DailySalesPage() {
       <header className="page-header"><div><span className="eyebrow">قسم المبيعات</span><h1>السجل اليومي للمبيعات</h1><p>تسجيل كل عملية بيع مستقلة ومتابعتها حسب تاريخ العمل.</p></div><button className="button button--secondary" type="button" onClick={() => setShowDeleted(true)}><Archive size={18} />المحذوفات</button></header>
       <DailyDateNavigation selectedDate={selectedDate} today={today} onChange={changeDate} onPrevious={() => changeDate(shiftLocalDate(selectedDate, -1))} onNext={() => changeDate(shiftLocalDate(selectedDate, 1))} />
       <div className="register-heading"><div><h2>مبيعات يوم {formatDate(selectedDate)}</h2><span>{formatNumber(dailySales.length)} عملية بيع</span></div></div>
-      <RepositoryStatus loading={loading || productsLoading} error={error || productsError} onRetry={() => { void reload(); void reloadProducts() }} /><SalesRegister sales={dailySales} customers={customers} products={products} selectedDate={selectedDate} onCreate={createSale} onUpdate={updateSale} onDelete={setDeletingSale} onHistory={setHistorySale} onReview={toggleReview} />
+      <RepositoryStatus loading={loading || productsLoading || salesLoading} error={error || productsError || salesError} onRetry={() => { void reload(); void reloadProducts(); void reloadSales() }} /><SalesRegister sales={dailySales} customers={customers} products={products} selectedDate={selectedDate} onCreate={createSale} onUpdate={updateSale} onDelete={setDeletingSale} onHistory={setHistorySale} onReview={toggleReview} />
       {deletingSale && <DeleteOperationDialog title="تأكيد حذف البيع" description={`سيُحذف بيع ${deletingSale.productNameSnapshot} للمشتري ${deletingSale.customerNameSnapshot} بوزن ${formatNumber(deletingSale.weightTons)} طن وإجمالي ${formatNumber(deletingSale.totalAmount)} ${deletingSale.saleCurrency} بتاريخ ${formatDate(deletingSale.saleDate)}، وسيُعكس أثره من حساب الزبون.`} onConfirm={confirmDelete} onClose={() => setDeletingSale(null)} />}
       {historySale && <OperationHistoryDialog title="سجل تغييرات البيع" history={historySale.history} onClose={() => setHistorySale(null)} />}
       {showDeleted && <DeletedRecordsDialog title="المبيعات المحذوفة" records={sales.filter((sale) => sale.isDeleted).map((record) => ({ kind: 'sale', record }))} onHistory={(record) => { setShowDeleted(false); setHistorySale(record as Sale) }} onClose={() => setShowDeleted(false)} />}
