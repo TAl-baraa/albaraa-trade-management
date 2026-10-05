@@ -1,0 +1,18 @@
+[package]
+name = "albaraa-trade-management"
+version = "0.1.0"
+description = "Al-Baraa Trade Management desktop application"
+edition = "2024"
+rust-version = "1.90"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "albaraa_trade_management_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.1", features = [] }
