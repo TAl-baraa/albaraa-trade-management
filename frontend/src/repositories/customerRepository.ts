@@ -1,43 +1,33 @@
-import { initialCustomers } from '../data/mockCustomers'
-import { createVersionedStorage } from '../services/storage/versionedStorage'
-import { storageKeys, storageSchemaVersions } from '../services/storage/storageKeys'
 import type { Customer } from '../types/customer'
+import { receiptRepository } from './receiptRepository'
+import { saleRepository } from './saleRepository'
+import { databaseCommand } from './tauriBridge'
 
-const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string'
-const isCustomer = (value: unknown): value is Customer => {
-  if (typeof value !== 'object' || value === null) return false
-  const customer = value as Record<string, unknown>
-  return typeof customer.id === 'string' && typeof customer.name === 'string' && typeof customer.phone === 'string' &&
-    typeof customer.notes === 'string' && typeof customer.iqdBalance === 'number' && Number.isFinite(customer.iqdBalance) &&
-    typeof customer.usdBalance === 'number' && Number.isFinite(customer.usdBalance) && isNullableString(customer.lastPurchaseDate) &&
-    isNullableString(customer.lastPaymentDate) && typeof customer.hasTransactionHistory === 'boolean' &&
-    typeof customer.isArchived === 'boolean' && typeof customer.createdAt === 'string' && isNullableString(customer.archivedAt)
-}
+export type CustomerInput = Pick<Customer, 'name' | 'phone' | 'notes' | 'iqdBalance' | 'usdBalance'>
 
-const storage = createVersionedStorage<Customer[]>(storageKeys.customers, storageSchemaVersions.customers, (value): value is Customer[] => Array.isArray(value) && value.every(isCustomer))
-
-export interface CustomerRepository {
-  getAll: () => Customer[]
-  getSnapshot: () => Customer[]
-  saveAll: (customers: Customer[]) => void
-}
-
-export const customerRepository: CustomerRepository = {
-  getSnapshot: () => {
-    const result = storage.load({ persistMigration: false })
-    if (result.status === 'invalid') throw new Error('Invalid customer storage')
-    return result.status === 'valid' ? result.data : initialCustomers.map((customer) => ({ ...customer }))
-  },
-  getAll: () => {
-    const result = storage.load()
-    if (result.status === 'valid') return result.data
-    if (result.status === 'invalid') {
-      storage.save([])
-      return []
+export const customerRepository = {
+  getAll: (): Promise<Customer[]> => databaseCommand('list_customers', { archived: null }),
+  getActive: (): Promise<Customer[]> => databaseCommand('list_customers', { archived: false }),
+  getArchived: (): Promise<Customer[]> => databaseCommand('list_customers', { archived: true }),
+  getById: (id: string): Promise<Customer | null> => databaseCommand('get_customer', { id }),
+  create: (input: CustomerInput): Promise<Customer> => databaseCommand('create_customer', { input }),
+  update: (id: string, input: CustomerInput): Promise<Customer> => databaseCommand('update_customer', { id, input }),
+  archive: (id: string): Promise<Customer> => databaseCommand('archive_customer', { id }),
+  reactivate: (id: string): Promise<Customer> => databaseCommand('reactivate_customer', { id }),
+  delete: async (id: string): Promise<void> => {
+    // Until transactions move to SQLite, their references are also checked here.
+    if (saleRepository.getSnapshot().some(sale => sale.customerId === id) || receiptRepository.getSnapshot().some(receipt => receipt.customerId === id)) {
+      throw new Error('لا يمكن حذف زبون له سجل معاملات.')
     }
-    const seededCustomers = initialCustomers.map((customer) => ({ ...customer }))
-    storage.save(seededCustomers)
-    return seededCustomers
+    await databaseCommand('delete_customer', { id })
   },
-  saveAll: (customers) => storage.save(customers),
+  updateAccountingBalances: async (previous: Customer[], next: Customer[]): Promise<void> => {
+    const updates = next.flatMap(customer => {
+      const original = previous.find(item => item.id === customer.id)
+      if (!original) throw new Error('تعذر العثور على الزبون.')
+      if (original.iqdBalance === customer.iqdBalance && original.usdBalance === customer.usdBalance && original.hasTransactionHistory === customer.hasTransactionHistory) return []
+      return [{ id: customer.id, expectedIqdBalance: original.iqdBalance, expectedUsdBalance: original.usdBalance, iqdBalance: customer.iqdBalance, usdBalance: customer.usdBalance, hasTransactionHistory: customer.hasTransactionHistory }]
+    })
+    await databaseCommand('update_customer_balances', { updates })
+  },
 }

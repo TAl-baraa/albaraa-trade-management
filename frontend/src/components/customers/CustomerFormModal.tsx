@@ -3,12 +3,12 @@ import type { BalanceDirection, Customer, CustomerFormValues } from '../../types
 import { getBalanceDirection } from '../../types/customer'
 import { Modal } from './Modal'
 
-interface CustomerFormModalProps { customer: Customer | null; onClose: () => void; onSubmit: (values: CustomerFormValues) => void }
+interface CustomerFormModalProps { customer: Customer | null; onClose: () => void; onSubmit: (values: CustomerFormValues) => Promise<void>; busy: boolean }
 type FormErrors = Partial<Record<'name' | 'iqdAmount' | 'usdAmount', string>>
 
 const amountFromBalance = (balance: number): string => balance === 0 ? '' : String(Math.abs(balance))
 
-export function CustomerFormModal({ customer, onClose, onSubmit }: CustomerFormModalProps) {
+export function CustomerFormModal({ customer, onClose, onSubmit, busy }: CustomerFormModalProps) {
   const [values, setValues] = useState<CustomerFormValues>({
     name: customer?.name ?? '', phone: customer?.phone ?? '', notes: customer?.notes ?? '',
     iqdDirection: getBalanceDirection(customer?.iqdBalance ?? 0), iqdAmount: amountFromBalance(customer?.iqdBalance ?? 0),
@@ -21,6 +21,7 @@ export function CustomerFormModal({ customer, onClose, onSubmit }: CustomerFormM
   }
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
+    if (busy) return
     const nextErrors: FormErrors = {}
     if (!values.name.trim()) nextErrors.name = 'اسم الزبون مطلوب.'
     for (const currency of ['iqd', 'usd'] as const) {
@@ -37,7 +38,7 @@ export function CustomerFormModal({ customer, onClose, onSubmit }: CustomerFormM
     <label className="field"><span>رقم الهاتف <em>اختياري</em></span><input type="tel" dir="ltr" value={values.phone} onChange={(e) => update('phone', e.target.value)} /></label>
     <label className="field field--wide"><span>ملاحظات <em>اختياري</em></span><textarea rows={3} value={values.notes} onChange={(e) => update('notes', e.target.value)} /></label></div>
     <div className="balance-fields"><BalanceField label="الرصيد الافتتاحي بالدينار" currency="iqd" direction={values.iqdDirection} amount={values.iqdAmount} error={errors.iqdAmount} onDirection={changeDirection} onAmount={(value) => update('iqdAmount', value)} /><BalanceField label="الرصيد الافتتاحي بالدولار" currency="usd" direction={values.usdDirection} amount={values.usdAmount} error={errors.usdAmount} onDirection={changeDirection} onAmount={(value) => update('usdAmount', value)} /></div>
-    <div className="modal__footer"><button className="button button--secondary" type="button" onClick={onClose}>إلغاء</button><button className="button button--primary" type="submit">{customer ? 'حفظ التعديلات' : 'إضافة الزبون'}</button></div>
+    <div className="modal__footer"><button className="button button--secondary" type="button" disabled={busy} onClick={onClose}>إلغاء</button><button className="button button--primary" type="submit" disabled={busy}>{customer ? 'حفظ التعديلات' : 'إضافة الزبون'}</button></div>
   </form></Modal>
 }
 

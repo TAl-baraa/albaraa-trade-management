@@ -3,9 +3,6 @@ export type Currency = 'IQD' | 'USD'
 export interface Product {
   id: string
   name: string
-  purchaseCurrency: Currency
-  purchasePrice: number
-  exchangeRate: number | null
   notes: string
   isArchived: boolean
   createdAt: string
@@ -14,8 +11,5 @@ export interface Product {
 
 export interface ProductFormValues {
   name: string
-  purchaseCurrency: Currency
-  purchasePrice: string
-  exchangeRate: string
   notes: string
 }

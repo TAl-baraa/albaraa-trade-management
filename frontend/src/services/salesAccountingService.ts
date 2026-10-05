@@ -1,3 +1,4 @@
+import { runLegacyOperation } from './legacyAccountingBridge'
 import { customerRepository } from '../repositories/customerRepository'
 import { productRepository } from '../repositories/productRepository'
 import { saleRepository } from '../repositories/saleRepository'
@@ -20,14 +21,16 @@ const applyDebt = (customers: Customer[], customerId: string, currency: Sale['sa
     hasTransactionHistory: true,
   })
 
-const persistAccountingState = (sales: Sale[], customers: Customer[]): void => {
+const persistAccountingState = async (sales: Sale[], customers: Customer[], previousCustomers: Customer[]): Promise<void> => {
+  const previousSales = saleRepository.getAll()
   saleRepository.saveAll(sales)
-  customerRepository.saveAll(customers)
+  try { await customerRepository.updateAccountingBalances(previousCustomers, customers) }
+  catch (error) { saleRepository.saveAll(previousSales); throw error }
 }
 
-const buildSale = (values: SaleFormValues, existing?: Sale): Sale | null => {
-  const customers = customerRepository.getAll()
-  const products = productRepository.getAll()
+const buildSale = async (values: SaleFormValues, existing?: Sale): Promise<Sale | null> => {
+  const customers = (await customerRepository.getAll())
+  const products = (await productRepository.getAll())
   const customer = customers.find((item) => item.id === values.customerId && !item.isArchived)
   const product = products.find((item) => item.id === values.productId && !item.isArchived)
   const totalAmount = calculateSaleTotal(values.weightTons, values.unitSalePrice)
@@ -57,9 +60,10 @@ const buildSale = (values: SaleFormValues, existing?: Sale): Sale | null => {
   }
 }
 
-export const salesAccountingService = {
-  create(values: SaleFormValues): SalesOperationResult {
-    const sale = buildSale(values)
+const operations = {
+  async create(values: SaleFormValues): Promise<SalesOperationResult> {
+    const previousCustomers = await customerRepository.getAll()
+    const sale = await buildSale(values)
     if (!sale) return { ok: false, message: 'تعذر حفظ البيع لأن بيانات الزبون أو المنتج لم تعد متاحة.' }
     const created = { ...sale, history: [createHistoryEntry('created', [
       { field: 'اسم المشتري', previousValue: null, newValue: sale.customerNameSnapshot }, { field: 'المنتج', previousValue: null, newValue: sale.productNameSnapshot },
@@ -68,18 +72,19 @@ export const salesAccountingService = {
       { field: 'الإجمالي', previousValue: null, newValue: sale.totalAmount }, { field: 'التاريخ', previousValue: null, newValue: sale.saleDate },
     ])] }
     const sales = [created, ...saleRepository.getAll()]
-    const customers = applyDebt(customerRepository.getAll(), sale.customerId, sale.saleCurrency, sale.totalAmount)
-    persistAccountingState(sales, customers)
+    const customers = applyDebt(previousCustomers, sale.customerId, sale.saleCurrency, sale.totalAmount)
+    await persistAccountingState(sales, customers, previousCustomers)
     return { ok: true, sale: created, sales, customers }
   },
 
-  update(saleId: string, values: SaleFormValues): SalesOperationResult {
+  async update(saleId: string, values: SaleFormValues): Promise<SalesOperationResult> {
+    const previousCustomers = await customerRepository.getAll()
     const currentSales = saleRepository.getAll()
     const original = currentSales.find((sale) => sale.id === saleId && !sale.isDeleted)
     if (!original) return { ok: false, message: 'تعذر العثور على سجل البيع المطلوب تعديله.' }
-    const updated = buildSale(values, original)
+    const updated = await buildSale(values, original)
     if (!updated) return { ok: false, message: 'تعذر حفظ البيع لأن بيانات الزبون أو المنتج لم تعد متاحة.' }
-    let customers = applyDebt(customerRepository.getAll(), original.customerId, original.saleCurrency, -original.totalAmount)
+    let customers = applyDebt(previousCustomers, original.customerId, original.saleCurrency, -original.totalAmount)
     customers = applyDebt(customers, updated.customerId, updated.saleCurrency, updated.totalAmount)
     const changes = collectChanges(original, updated, [
       { key: 'customerNameSnapshot', label: 'اسم المشتري' }, { key: 'productNameSnapshot', label: 'المنتج' },
@@ -89,11 +94,12 @@ export const salesAccountingService = {
     ])
     const audited = { ...updated, history: [...original.history, createHistoryEntry('updated', changes)] }
     const sales = currentSales.map((sale) => sale.id === saleId ? audited : sale)
-    persistAccountingState(sales, customers)
+    await persistAccountingState(sales, customers, previousCustomers)
     return { ok: true, sale: audited, sales, customers }
   },
 
-  delete(saleId: string, reason = ''): SalesOperationResult {
+  async delete(saleId: string, reason = ''): Promise<SalesOperationResult> {
+    const previousCustomers = await customerRepository.getAll()
     const currentSales = saleRepository.getAll()
     const original = currentSales.find((sale) => sale.id === saleId && !sale.isDeleted)
     if (!original) return { ok: false, message: 'تعذر العثور على سجل البيع المطلوب حذفه.' }
@@ -101,18 +107,26 @@ export const salesAccountingService = {
     const now = new Date().toISOString()
     const deleted: Sale = { ...original, isDeleted: true, deletedAt: now, deletedBy: CURRENT_ACTOR, deletionReason: reason.trim() || null, updatedAt: now, history: [...original.history, createHistoryEntry('deleted', reason.trim() ? [{ field: 'سبب الحذف', previousValue: null, newValue: reason.trim() }] : [])] }
     const sales = currentSales.map((sale) => sale.id === saleId ? deleted : sale)
-    const customers = applyDebt(customerRepository.getAll(), original.customerId, original.saleCurrency, -original.totalAmount)
-    persistAccountingState(sales, customers)
+    const customers = applyDebt(previousCustomers, original.customerId, original.saleCurrency, -original.totalAmount)
+    await persistAccountingState(sales, customers, previousCustomers)
     return { ok: true, sales, customers }
   },
 
-  toggleReviewed(saleId: string): SalesOperationResult {
+  async toggleReviewed(saleId: string): Promise<SalesOperationResult> {
+    const previousCustomers = await customerRepository.getAll()
     const sales = saleRepository.getAll()
     const sale = sales.find((item) => item.id === saleId && !item.isDeleted)
     if (!sale) return { ok: false, message: 'تعذر العثور على سجل البيع.' }
     const updated = { ...sale, isReviewed: !sale.isReviewed, updatedAt: new Date().toISOString() }
     const nextSales = sales.map((item) => item.id === saleId ? updated : item)
     saleRepository.saveAll(nextSales)
-    return { ok: true, sale: updated, sales: nextSales, customers: customerRepository.getAll() }
+    return { ok: true, sale: updated, sales: nextSales, customers: previousCustomers }
   },
+}
+
+export const salesAccountingService = {
+  create: (values: SaleFormValues) => runLegacyOperation(() => operations.create(values)),
+  update: (id: string, values: SaleFormValues) => runLegacyOperation(() => operations.update(id, values)),
+  delete: (id: string, reason = '') => runLegacyOperation(() => operations.delete(id, reason)),
+  toggleReviewed: (id: string) => runLegacyOperation(() => operations.toggleReviewed(id)),
 }

@@ -15,28 +15,31 @@ import './DashboardPage.css'
 
 type DashboardState = { ok: true; summary: DashboardSummary } | { ok: false }
 
-const loadDashboard = (): DashboardState => {
+const loadDashboard = async (): Promise<DashboardState> => {
   try {
-    return { ok: true, summary: buildDashboardSummary(customerRepository.getSnapshot(), saleRepository.getSnapshot(), receiptRepository.getSnapshot(), getLocalDateString()) }
+    return { ok: true, summary: buildDashboardSummary(await customerRepository.getAll(), saleRepository.getSnapshot(), receiptRepository.getSnapshot(), getLocalDateString()) }
   } catch {
     return { ok: false }
   }
 }
 
 export function DashboardPage() {
-  const [state, setState] = useState<DashboardState>(loadDashboard)
-  const refresh = () => setState(loadDashboard())
+  const [state, setState] = useState<DashboardState>({ ok: false })
+  const [loading, setLoading] = useState(true)
+  const refresh = async () => { setLoading(true); setState(await loadDashboard()); setLoading(false) }
   useEffect(() => {
-    const reload = () => setState(loadDashboard())
+    let active = true
+    const reload = async () => { const next = await loadDashboard(); if (active) { setState(next); setLoading(false) } }
+    void reload()
     window.addEventListener('focus', reload)
     window.addEventListener('storage', reload)
     const interval = window.setInterval(reload, 60_000)
-    return () => { window.removeEventListener('focus', reload); window.removeEventListener('storage', reload); window.clearInterval(interval) }
+    return () => { active = false; window.removeEventListener('focus', reload); window.removeEventListener('storage', reload); window.clearInterval(interval) }
   }, [])
 
   return <div className="page-container dashboard-page">
     <header className="page-header"><div><span className="eyebrow">نظرة عامة على المكتب</span><h1>لوحة المتابعة</h1><p>ملخص المبيعات والواصل وأرصدة الزبائن — {formatDate(state.ok ? state.summary.today : getLocalDateString())}</p></div><button className="button button--secondary" type="button" onClick={refresh}><RefreshCw size={18} />تحديث</button></header>
-    {!state.ok ? <p className="dashboard-error" role="alert">تعذر قراءة البيانات المحفوظة. لم تُغيّر أي بيانات. أعد المحاولة أو راجع السجلات قبل الاعتماد على الملخص.</p> : <>
+    {loading ? <p role="status">جارٍ تحميل البيانات...</p> : !state.ok ? <p className="dashboard-error" role="alert">تعذر قراءة البيانات المحفوظة. لم تُغيّر أي بيانات. أعد المحاولة أو راجع السجلات قبل الاعتماد على الملخص.</p> : <>
       <div className="dashboard-grid">
         <DailyActivitySummary title="مبيعات اليوم" countLabel="عدد عمليات البيع" activity={state.summary.sales} icon={BookOpenText} />
         <DailyActivitySummary title="الواصل اليوم" countLabel="عدد عمليات الاستلام" activity={state.summary.receipts} icon={ReceiptText} />

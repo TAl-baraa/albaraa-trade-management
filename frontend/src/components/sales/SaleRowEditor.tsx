@@ -11,7 +11,7 @@ import { MoneyInput } from '../common/MoneyInput'
 
 type FieldName = keyof SaleFormValues | 'totalAmount'
 type FormErrors = Partial<Record<FieldName, string>>
-interface SaleRowEditorProps { customers: Customer[]; products: Product[]; selectedDate: string; sale?: Sale; variant: 'table' | 'card'; onSave: (values: SaleFormValues) => boolean; onCancel?: () => void }
+interface SaleRowEditorProps { customers: Customer[]; products: Product[]; selectedDate: string; sale?: Sale; variant: 'table' | 'card'; onSave: (values: SaleFormValues) => Promise<boolean>; onCancel?: () => void }
 
 const emptyValues = (saleDate: string): SaleFormValues => ({ customerId: '', productId: '', weightTons: '', driverName: '', unitSalePrice: '', saleCurrency: 'IQD', saleDate })
 const valuesFromSale = (sale: Sale): SaleFormValues => ({ customerId: sale.customerId, productId: sale.productId, weightTons: String(sale.weightTons), driverName: sale.driverName, unitSalePrice: String(sale.unitSalePrice), saleCurrency: sale.saleCurrency, saleDate: sale.saleDate })
@@ -25,21 +25,26 @@ export function SaleRowEditor({ customers, products, selectedDate, sale, variant
   const activeProducts = products.filter((product) => !product.isArchived)
   const total = calculateSaleTotal(values.weightTons, values.unitSalePrice)
   const update = <K extends keyof SaleFormValues>(key: K, value: SaleFormValues[K]) => setValues((current) => ({ ...current, [key]: value }))
-  const approve = () => {
-    const nextErrors: FormErrors = {}
-    if (!activeCustomers.some((customer) => customer.id === values.customerId)) nextErrors.customerId = 'اختر مشتريًا من النتائج.'
-    if (!activeProducts.some((product) => product.id === values.productId)) nextErrors.productId = 'اختر منتجًا من النتائج.'
-    if (!isPositiveDecimal(values.weightTons)) nextErrors.weightTons = 'أدخل وزنًا أكبر من صفر.'
-    if (!values.driverName.trim()) nextErrors.driverName = 'اسم السائق مطلوب.'
-    if (!isPositiveDecimal(values.unitSalePrice)) nextErrors.unitSalePrice = 'أدخل سعرًا أكبر من صفر.'
-    if (!isValidDateString(values.saleDate)) nextErrors.saleDate = 'أدخل تاريخًا صحيحًا.'
-    if (total === null) nextErrors.totalAmount = 'الإجمالي غير صالح.'
-    setErrors(nextErrors)
-    if (Object.keys(nextErrors).length > 0) return
-    if (onSave({ ...values, driverName: values.driverName.trim() }) && !sale) {
-      setValues(emptyValues(selectedDate))
-      requestAnimationFrame(() => weightRef.current?.focus())
-    }
+  const [saving, setSaving] = useState(false)
+  const approve = async () => {
+    if (saving) return
+    setSaving(true)
+    try {
+      const nextErrors: FormErrors = {}
+      if (!activeCustomers.some((customer) => customer.id === values.customerId)) nextErrors.customerId = 'اختر مشتريًا من النتائج.'
+      if (!activeProducts.some((product) => product.id === values.productId)) nextErrors.productId = 'اختر منتجًا من النتائج.'
+      if (!isPositiveDecimal(values.weightTons)) nextErrors.weightTons = 'أدخل وزنًا أكبر من صفر.'
+      if (!values.driverName.trim()) nextErrors.driverName = 'اسم السائق مطلوب.'
+      if (!isPositiveDecimal(values.unitSalePrice)) nextErrors.unitSalePrice = 'أدخل سعرًا أكبر من صفر.'
+      if (!isValidDateString(values.saleDate)) nextErrors.saleDate = 'أدخل تاريخًا صحيحًا.'
+      if (total === null) nextErrors.totalAmount = 'الإجمالي غير صالح.'
+      setErrors(nextErrors)
+      if (Object.keys(nextErrors).length > 0) return
+      if (await onSave({ ...values, driverName: values.driverName.trim() }) && !sale) {
+        setValues(emptyValues(selectedDate))
+        requestAnimationFrame(() => weightRef.current?.focus())
+      }
+    } finally { setSaving(false) }
   }
   const input = (key: 'weightTons' | 'driverName' | 'unitSalePrice', label: string, numeric = false) => <label className="inline-field"><span className="visually-hidden">{label}</span><input ref={key === 'weightTons' ? weightRef : undefined} type={numeric ? 'number' : 'text'} min={numeric ? '0' : undefined} step={numeric ? 'any' : undefined} inputMode={numeric ? 'decimal' : undefined} placeholder={label} value={values[key]} aria-invalid={Boolean(errors[key])} onChange={(event) => update(key, event.target.value)} />{errors[key] && <small className="field-error">{errors[key]}</small>}</label>
   const controls = {
@@ -52,7 +57,7 @@ export function SaleRowEditor({ customers, products, selectedDate, sale, variant
     total: <div className="inline-total"><output aria-label="الإجمالي المحسوب" aria-live="polite">{total === null ? '—' : `${formatNumber(total)} ${values.saleCurrency}`}</output>{errors.totalAmount && <small className="field-error">{errors.totalAmount}</small>}</div>,
     date: <label className="inline-field"><span className="visually-hidden">التاريخ</span><input type="date" value={values.saleDate} aria-invalid={Boolean(errors.saleDate)} onChange={(event) => update('saleDate', event.target.value)} />{errors.saleDate && <small className="field-error">{errors.saleDate}</small>}</label>,
   }
-  const actions = <div className="inline-actions"><button className="button button--primary button--small" type="button" onClick={approve}><Check size={16} />{sale ? 'اعتماد التعديلات' : 'اعتماد'}</button>{sale && onCancel && <button className="button button--secondary button--small" type="button" onClick={onCancel}><X size={16} />إلغاء</button>}</div>
+  const actions = <div className="inline-actions"><button className="button button--primary button--small" type="button" disabled={saving} onClick={approve}><Check size={16} />{sale ? 'اعتماد التعديلات' : 'اعتماد'}</button>{sale && onCancel && <button className="button button--secondary button--small" type="button" onClick={onCancel}><X size={16} />إلغاء</button>}</div>
   if (variant === 'table') return <tr className={`editable-sale-row ${sale ? 'editable-sale-row--editing' : ''}`}><td>{sale ? '—' : '+'}</td><td>{controls.weight}</td><td>{controls.product}</td><td>{controls.driver}</td><td>{controls.customer}</td><td>{controls.price}</td><td>{controls.currency}</td><td>{controls.total}</td><td>{controls.date}</td><td>{actions}</td></tr>
   return <article className={`sale-card sale-card--editor ${sale ? 'sale-card--editing' : ''}`}><header><h2>{sale ? 'تعديل عملية البيع' : 'بيع جديد'}</h2></header><div className="sale-card-editor-grid"><div><span>الوزن (طن)</span>{controls.weight}</div><div><span>المنتج</span>{controls.product}</div><div><span>اسم السائق</span>{controls.driver}</div><div><span>اسم المشتري</span>{controls.customer}</div><div><span>سعر بيع الطن</span>{controls.price}</div><div><span>العملة</span>{controls.currency}</div><div><span>الإجمالي</span>{controls.total}</div><div><span>التاريخ</span>{controls.date}</div></div><footer>{actions}</footer></article>
 }

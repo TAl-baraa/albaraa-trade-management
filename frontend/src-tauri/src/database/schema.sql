@@ -25,15 +25,10 @@ CREATE TABLE products (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL CHECK (length(trim(name)) > 0),
     normalized_name TEXT NOT NULL UNIQUE CHECK (length(trim(normalized_name)) > 0),
-    purchase_currency TEXT NOT NULL CHECK (purchase_currency IN ('IQD', 'USD')),
-    purchase_price TEXT NOT NULL CHECK (length(purchase_price) > 0 AND purchase_price NOT GLOB '*[^0-9.]*' AND purchase_price GLOB '[0-9]*' AND length(purchase_price) - length(replace(purchase_price, '.', '')) <= 1 AND purchase_price NOT LIKE '%.'),
-    exchange_rate TEXT,
     notes TEXT NOT NULL DEFAULT '',
     is_archived INTEGER NOT NULL DEFAULT 0 CHECK (is_archived IN (0, 1)),
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    CHECK ((purchase_currency = 'IQD' AND exchange_rate IS NULL) OR
-        (purchase_currency = 'USD' AND exchange_rate IS NOT NULL AND exchange_rate NOT GLOB '*[^0-9.]*' AND exchange_rate GLOB '[0-9]*' AND length(exchange_rate) - length(replace(exchange_rate, '.', '')) <= 1 AND exchange_rate NOT LIKE '%.' AND exchange_rate GLOB '*[1-9]*'))
+    updated_at TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE sales (
@@ -98,5 +93,5 @@ CREATE INDEX receipts_customer ON receipts(customer_id, is_deleted, business_dat
 CREATE INDEX history_sale ON operation_history(sale_id, changed_at);
 CREATE INDEX history_receipt ON operation_history(receipt_id, changed_at);
 
-INSERT INTO app_metadata(key, value) VALUES ('schema_version', '1');
-PRAGMA user_version = 1;
+INSERT INTO app_metadata(key, value) VALUES ('schema_version', '2');
+PRAGMA user_version = 2;

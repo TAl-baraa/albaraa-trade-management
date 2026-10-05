@@ -1,7 +1,12 @@
 use rusqlite::{Connection, TransactionBehavior};
+pub mod customers;
+pub mod products;
+pub mod records;
+#[cfg(test)]
+mod repository_tests;
 use std::{error::Error, fs, io, path::Path, time::Duration};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const SCHEMA: &str = include_str!("schema.sql");
 const TABLES: [&str; 6] = [
     "app_metadata",
@@ -99,7 +104,9 @@ mod tests {
         assert_eq!(integrity, "ok");
         connection.pragma_update(None, "user_version", 99).unwrap();
         assert!(initialize(&directory).is_err());
-        connection.pragma_update(None, "user_version", 1).unwrap();
+        connection
+            .pragma_update(None, "user_version", SCHEMA_VERSION)
+            .unwrap();
         connection
             .execute(
                 "UPDATE app_metadata SET value = '99' WHERE key = 'schema_version'",
@@ -119,7 +126,7 @@ mod tests {
             .pragma_update(None, "foreign_keys", true)
             .unwrap();
         connection.execute_batch(SCHEMA).unwrap();
-        connection.execute("INSERT INTO products(id, name, normalized_name, purchase_currency, purchase_price, created_at, updated_at) VALUES ('p', 'Original product', 'original product', 'IQD', '123.4567', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z')", []).unwrap();
+        connection.execute("INSERT INTO products(id, name, normalized_name, created_at, updated_at) VALUES ('p', 'Original product', 'original product', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z')", []).unwrap();
         connection.execute("INSERT INTO customers(id, name, created_at, updated_at, iqd_balance_minor, usd_balance_minor) VALUES ('c', 'Customer', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z', 100, -250)", []).unwrap();
         connection.execute("INSERT INTO receipts(id, customer_id, customer_name_snapshot, amount_minor, currency, business_date, created_at, updated_at) VALUES ('r', 'c', 'Snapshot', 125, 'USD', '2026-10-05', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z')", []).unwrap();
         connection.execute("INSERT INTO sales(id, customer_id, customer_name_snapshot, product_id, product_name_snapshot, weight_tons, driver_name, unit_sale_price, sale_currency, total_amount_minor, sale_date, created_at, updated_at) VALUES ('s', 'c', 'Customer snapshot', 'p', 'Product snapshot', '1.234567', 'Driver', '123.4567', 'IQD', 15242, '2026-10-05', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z')", []).unwrap();
@@ -145,7 +152,6 @@ mod tests {
             "UPDATE sales SET weight_tons = '1.2.3'",
             "UPDATE sales SET unit_sale_price = '0.0'",
             "UPDATE sales SET product_id = 'missing'",
-            "UPDATE products SET exchange_rate = '1500'",
             "DELETE FROM products WHERE id = 'p'",
             "DELETE FROM customers WHERE id = 'c'",
             "INSERT INTO operation_history(id, operation_type, actor, changed_at) VALUES ('h', 'created', 'actor', 'now')",
