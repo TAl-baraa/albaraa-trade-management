@@ -202,7 +202,7 @@ fn validate_database(connection: &Connection) -> RepositoryResult<()> {
         )
         .optional()
         .map_err(|_| "هذا الملف ليس نسخة احتياطية صالحة لنظام البراء.".to_string())?;
-    if version != SCHEMA_VERSION || metadata_version.as_deref() != Some("3") {
+    if version != SCHEMA_VERSION || metadata_version.as_deref() != Some("4") {
         return Err("إصدار النسخة الاحتياطية غير مدعوم في هذا الإصدار من التطبيق.".into());
     }
     for table in TABLES {
@@ -454,8 +454,10 @@ fn restore_with_recovery_directory(
 mod tests {
     use super::*;
     use crate::database::DATABASE_FILE_NAME;
-    use crate::database::records::{CustomerInput, ProductInput, ReceiptInput, SaleInput};
-    use crate::database::{auth, customers, products, receipts, sales};
+    use crate::database::records::{
+        CustomerInput, ProductInput, ReceiptInput, SaleInput, TransferInput,
+    };
+    use crate::database::{auth, customers, products, receipts, sales, transfers};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestDirectory(PathBuf);
@@ -552,10 +554,22 @@ mod tests {
         receipts::create(
             &mut connection,
             ReceiptInput {
-                customer_id: customer.id,
+                customer_id: customer.id.clone(),
                 amount: "25".into(),
                 currency: "IQD".into(),
                 business_date: "2026-10-06".into(),
+                notes: String::new(),
+            },
+        )
+        .unwrap();
+        transfers::create(
+            &mut connection,
+            TransferInput {
+                customer_id: customer.id.clone(),
+                amount: "10".into(),
+                currency: "USD".into(),
+                business_date: "2026-10-06".into(),
+                description: "Transfer backup test".into(),
                 notes: String::new(),
             },
         )
@@ -580,6 +594,7 @@ mod tests {
             "products",
             "sales",
             "receipts",
+            "transfers",
             "operation_history",
         ] {
             let count: i64 = backup
@@ -667,11 +682,23 @@ mod tests {
         receipts::create(
             &mut connection,
             ReceiptInput {
-                customer_id: customer.id,
+                customer_id: customer.id.clone(),
                 amount: "50".into(),
                 currency: "IQD".into(),
                 business_date: "2026-10-06".into(),
                 notes: "Original receipt".into(),
+            },
+        )
+        .unwrap();
+        transfers::create(
+            &mut connection,
+            TransferInput {
+                customer_id: customer.id,
+                amount: "10".into(),
+                currency: "IQD".into(),
+                business_date: "2026-10-06".into(),
+                description: "Original transfer".into(),
+                notes: String::new(),
             },
         )
         .unwrap();
@@ -731,17 +758,18 @@ mod tests {
         );
         assert_eq!(
             customers::list(&restored, None).unwrap()[0].iqd_balance,
-            150.0
+            160.0
         );
         assert_eq!(products::list(&restored, None).unwrap().len(), 1);
         assert_eq!(sales::list(&restored, None).unwrap().len(), 1);
         assert_eq!(receipts::list(&restored, None).unwrap().len(), 1);
+        assert_eq!(transfers::list(&restored, None).unwrap().len(), 1);
         let history_count: i64 = restored
             .query_row("SELECT count(*) FROM operation_history", [], |row| {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(history_count, 2);
+        assert_eq!(history_count, 3);
     }
 
     #[test]

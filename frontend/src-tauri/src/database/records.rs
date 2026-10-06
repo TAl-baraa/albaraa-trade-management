@@ -207,3 +207,42 @@ pub struct ReceiptMutation {
     pub receipts: Vec<Receipt>,
     pub customers: Vec<Customer>,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransferInput {
+    pub customer_id: String,
+    pub amount: String,
+    pub currency: String,
+    pub business_date: String,
+    pub description: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Transfer {
+    pub id: String,
+    pub customer_id: String,
+    pub customer_name_snapshot: String,
+    pub amount: f64,
+    pub currency: String,
+    pub business_date: String,
+    pub description: String,
+    pub notes: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub is_deleted: bool,
+    pub deleted_at: Option<String>,
+    pub deleted_by: Option<String>,
+    pub deletion_reason: Option<String>,
+    pub history: Vec<OperationHistoryEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferMutation {
+    pub transfer: Option<Transfer>,
+    pub transfers: Vec<Transfer>,
+    pub customers: Vec<Customer>,
+}

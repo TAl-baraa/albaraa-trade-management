@@ -1,5 +1,6 @@
 mod commands;
 mod database;
+mod statement_pdf;
 
 use std::{sync::Arc, thread, time::Duration};
 use tauri::Manager;
@@ -45,7 +46,14 @@ pub fn run() {
             commands::get_receipt,
             commands::create_receipt,
             commands::update_receipt,
-            commands::soft_delete_receipt
+            commands::soft_delete_receipt,
+            commands::list_transfers,
+            commands::list_transfers_by_business_date,
+            commands::get_transfer,
+            commands::create_transfer,
+            commands::update_transfer,
+            commands::soft_delete_transfer,
+            statement_pdf::share_statement_pdf
         ])
         .setup(|app| {
             let directory = app.path().app_data_dir()?;

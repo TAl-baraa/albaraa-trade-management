@@ -1,6 +1,7 @@
 import type { Customer } from '../types/customer'
 import type { Currency } from '../types/product'
 import type { Receipt } from '../types/receipt'
+import type { Transfer } from '../types/transfer'
 import type { Sale } from '../types/sale'
 
 export interface CurrencyTotals { IQD: number; USD: number }
@@ -9,6 +10,7 @@ export interface DashboardSummary {
   today: string
   sales: DailyTotals
   receipts: DailyTotals
+  transfers: DailyTotals
   activeCustomers: number
   archivedCustomers: number
   debt: CurrencyTotals
@@ -24,11 +26,12 @@ const sumMoney = (amounts: readonly number[]): number =>
 const compareRecent = (leftDate: string, rightDate: string, left: { createdAt: string; id: string }, right: { createdAt: string; id: string }): number =>
   rightDate.localeCompare(leftDate) || right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id)
 
-export function buildDashboardSummary(customers: readonly Customer[], sales: readonly Sale[], receipts: readonly Receipt[], today: string): DashboardSummary {
+export function buildDashboardSummary(customers: readonly Customer[], sales: readonly Sale[], receipts: readonly Receipt[], transfers: readonly Transfer[], today: string): DashboardSummary {
   const activeSales = sales.filter((sale) => !sale.isDeleted)
   const activeReceipts = receipts.filter((receipt) => !receipt.isDeleted)
   const dailySales = activeSales.filter((sale) => sale.saleDate === today)
   const dailyReceipts = activeReceipts.filter((receipt) => receipt.businessDate === today)
+  const dailyTransfers = transfers.filter((transfer) => !transfer.isDeleted && transfer.businessDate === today)
   const activeCustomers = customers.filter((customer) => !customer.isArchived)
   const debtFor = (currency: Currency): number => sumMoney(customers.map((customer) => Math.max(currency === 'IQD' ? customer.iqdBalance : customer.usdBalance, 0)))
   const creditFor = (currency: Currency): number => sumMoney(customers.map((customer) => Math.max(-(currency === 'IQD' ? customer.iqdBalance : customer.usdBalance), 0)))
@@ -46,6 +49,10 @@ export function buildDashboardSummary(customers: readonly Customer[], sales: rea
     receipts: { count: dailyReceipts.length, totals: {
       IQD: sumMoney(dailyReceipts.filter((receipt) => receipt.currency === 'IQD').map((receipt) => receipt.amount)),
       USD: sumMoney(dailyReceipts.filter((receipt) => receipt.currency === 'USD').map((receipt) => receipt.amount)),
+    } },
+    transfers: { count: dailyTransfers.length, totals: {
+      IQD: sumMoney(dailyTransfers.filter((transfer) => transfer.currency === 'IQD').map((transfer) => transfer.amount)),
+      USD: sumMoney(dailyTransfers.filter((transfer) => transfer.currency === 'USD').map((transfer) => transfer.amount)),
     } },
     activeCustomers: activeCustomers.length,
     archivedCustomers: customers.length - activeCustomers.length,

@@ -57,7 +57,7 @@ pub fn set_archived(
 }
 
 pub fn delete(connection: &Connection, id: &str) -> RepositoryResult<()> {
-    let count = connection.execute("DELETE FROM customers WHERE id=?1 AND iqd_balance_minor=0 AND usd_balance_minor=0 AND has_transaction_history=0 AND NOT EXISTS (SELECT 1 FROM sales WHERE customer_id=?1) AND NOT EXISTS (SELECT 1 FROM receipts WHERE customer_id=?1)", [id]).map_err(database_error)?;
+    let count = connection.execute("DELETE FROM customers WHERE id=?1 AND iqd_balance_minor=0 AND usd_balance_minor=0 AND has_transaction_history=0 AND NOT EXISTS (SELECT 1 FROM sales WHERE customer_id=?1) AND NOT EXISTS (SELECT 1 FROM receipts WHERE customer_id=?1) AND NOT EXISTS (SELECT 1 FROM transfers WHERE customer_id=?1)", [id]).map_err(database_error)?;
     if count == 1 {
         Ok(())
     } else {

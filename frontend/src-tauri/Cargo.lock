@@ -31,6 +31,9 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "unicode-normalization",
+ "webview2-com",
+ "windows",
+ "windows-collections",
 ]
 
 [[package]]

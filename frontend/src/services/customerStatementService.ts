@@ -1,16 +1,18 @@
 import type { Currency } from '../types/product'
 import type { Receipt } from '../types/receipt'
 import type { Sale } from '../types/sale'
+import type { Transfer } from '../types/transfer'
 
 export type StatementTransaction =
   | { kind: 'sale'; id: string; date: string; createdAt: string; amount: number; record: Sale }
+  | { kind: 'transfer'; id: string; date: string; createdAt: string; amount: number; record: Transfer }
   | { kind: 'receipt'; id: string; date: string; createdAt: string; amount: number; record: Receipt }
 
 export interface StatementSection {
   id: string
   openingDebt: number
-  sales: Extract<StatementTransaction, { kind: 'sale' }>[]
-  salesTotal: number
+  debits: Extract<StatementTransaction, { kind: 'sale' | 'transfer' }>[]
+  debitTotal: number
   openingCredit: number
   carriedCustomerCredit: { kind: 'carried-customer-credit'; amount: number; calculated: true } | null
   receipts: Extract<StatementTransaction, { kind: 'receipt' }>[]
@@ -52,7 +54,7 @@ const money = (valueInCents: number): number => valueInCents / 100
 const compareTransactions = (left: StatementTransaction, right: StatementTransaction): number => {
   const date = left.date.localeCompare(right.date)
   if (date !== 0) return date
-  if (left.kind !== right.kind) return left.kind === 'sale' ? -1 : 1
+  if (left.kind !== right.kind) return left.kind === 'receipt' ? 1 : right.kind === 'receipt' ? -1 : left.kind.localeCompare(right.kind)
   const time = left.createdAt.localeCompare(right.createdAt)
   return time !== 0 ? time : left.id.localeCompare(right.id)
 }
@@ -62,6 +64,7 @@ export const buildCustomerStatement = (input: {
   currency: Currency
   sales: Sale[]
   receipts: Receipt[]
+  transfers: Transfer[]
   initialBalance?: number
   startDate?: string | null
   endDate?: string | null
@@ -70,35 +73,36 @@ export const buildCustomerStatement = (input: {
   const transactions: StatementTransaction[] = [
     ...input.sales.filter((sale) => !sale.isDeleted && sale.customerId === customerId && sale.saleCurrency === currency).map((record) => ({ kind: 'sale' as const, id: record.id, date: record.saleDate, createdAt: record.createdAt || '', amount: record.totalAmount, record })),
     ...input.receipts.filter((receipt) => !receipt.isDeleted && receipt.customerId === customerId && receipt.currency === currency).map((record) => ({ kind: 'receipt' as const, id: record.id, date: record.businessDate, createdAt: record.createdAt || '', amount: record.amount, record })),
+    ...input.transfers.filter((transfer) => !transfer.isDeleted && transfer.customerId === customerId && transfer.currency === currency).map((record) => ({ kind: 'transfer' as const, id: record.id, date: record.businessDate, createdAt: record.createdAt || '', amount: record.amount, record })),
   ].sort(compareTransactions)
   const before = startDate ? transactions.filter((transaction) => transaction.date < startDate) : []
-  const openingCents = before.reduce((balance, transaction) => balance + (transaction.kind === 'sale' ? cents(transaction.amount) : -cents(transaction.amount)), cents(input.initialBalance ?? 0))
+  const openingCents = before.reduce((balance, transaction) => balance + (transaction.kind === 'receipt' ? -cents(transaction.amount) : cents(transaction.amount)), cents(input.initialBalance ?? 0))
   const period = transactions.filter((transaction) => (!startDate || transaction.date >= startDate) && (!endDate || transaction.date <= endDate))
   const sections: StatementSection[] = []
   let runningCents = openingCents
-  let pendingSales: Extract<StatementTransaction, { kind: 'sale' }>[] = []
+  let pendingDebits: Extract<StatementTransaction, { kind: 'sale' | 'transfer' }>[] = []
   let pendingReceipts: Extract<StatementTransaction, { kind: 'receipt' }>[] = []
   const flush = () => {
-    if (pendingSales.length === 0 && pendingReceipts.length === 0) return
+    if (pendingDebits.length === 0 && pendingReceipts.length === 0) return
     const openingDebt = Math.max(runningCents, 0)
     const openingCredit = Math.max(-runningCents, 0)
-    const salesCents = pendingSales.reduce((sum, sale) => sum + cents(sale.amount), 0)
+    const debitCents = pendingDebits.reduce((sum, debit) => sum + cents(debit.amount), 0)
     const receiptsCents = pendingReceipts.reduce((sum, receipt) => sum + cents(receipt.amount), 0)
-    runningCents += salesCents - receiptsCents
-    sections.push({ id: `section-${sections.length + 1}`, openingDebt: money(openingDebt), sales: pendingSales, salesTotal: money(openingDebt + salesCents), openingCredit: money(openingCredit), carriedCustomerCredit: openingCredit > 0 ? { kind: 'carried-customer-credit', amount: money(openingCredit), calculated: true } : null, receipts: pendingReceipts, balance: money(runningCents) })
-    pendingSales = []
+    runningCents += debitCents - receiptsCents
+    sections.push({ id: `section-${sections.length + 1}`, openingDebt: money(openingDebt), debits: pendingDebits, debitTotal: money(openingDebt + debitCents), openingCredit: money(openingCredit), carriedCustomerCredit: openingCredit > 0 ? { kind: 'carried-customer-credit', amount: money(openingCredit), calculated: true } : null, receipts: pendingReceipts, balance: money(runningCents) })
+    pendingDebits = []
     pendingReceipts = []
   }
   for (const transaction of period) {
-    if (transaction.kind === 'sale') {
+    if (transaction.kind !== 'receipt') {
       if (pendingReceipts.length > 0) flush()
-      pendingSales.push(transaction)
+      pendingDebits.push(transaction)
     } else pendingReceipts.push(transaction)
   }
   flush()
   if (sections.length === 0 && openingCents !== 0) {
     const openingCredit = Math.max(-openingCents, 0)
-    sections.push({ id: 'section-1', openingDebt: money(Math.max(openingCents, 0)), sales: [], salesTotal: money(Math.max(openingCents, 0)), openingCredit: money(openingCredit), carriedCustomerCredit: openingCredit > 0 ? { kind: 'carried-customer-credit', amount: money(openingCredit), calculated: true } : null, receipts: [], balance: money(openingCents) })
+    sections.push({ id: 'section-1', openingDebt: money(Math.max(openingCents, 0)), debits: [], debitTotal: money(Math.max(openingCents, 0)), openingCredit: money(openingCredit), carriedCustomerCredit: openingCredit > 0 ? { kind: 'carried-customer-credit', amount: money(openingCredit), calculated: true } : null, receipts: [], balance: money(openingCents) })
   }
   const openingBalanceDate = before.at(-1)?.date ?? null
   const openingBalance = money(openingCents)
@@ -108,7 +112,7 @@ export const buildCustomerStatement = (input: {
   return { currency, startDate, endDate, openingBalance, openingBalanceDate, dateRangeOpening, sections, transactions: period, finalBalance: money(runningCents) }
 }
 
-export const deriveInitialBalance = (currentBalance: number, customerId: string, currency: Currency, sales: Sale[], receipts: Receipt[]): number => {
-  const transactionNet = buildCustomerStatement({ customerId, currency, sales, receipts }).finalBalance
+export const deriveInitialBalance = (currentBalance: number, customerId: string, currency: Currency, sales: Sale[], receipts: Receipt[], transfers: Transfer[]): number => {
+  const transactionNet = buildCustomerStatement({ customerId, currency, sales, receipts, transfers }).finalBalance
   return money(cents(currentBalance) - cents(transactionNet))
 }

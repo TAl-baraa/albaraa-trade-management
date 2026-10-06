@@ -80,15 +80,35 @@ CREATE TABLE receipts (
         (is_deleted = 1 AND deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND deletion_reason IS NOT NULL AND length(trim(deletion_reason)) > 0))
 ) STRICT;
 
+CREATE TABLE transfers (
+    id TEXT PRIMARY KEY NOT NULL,
+    customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+    customer_name_snapshot TEXT NOT NULL,
+    amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+    currency TEXT NOT NULL CHECK (currency IN ('IQD', 'USD')),
+    business_date TEXT NOT NULL CHECK (length(business_date) = 10 AND business_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND date(business_date, '+0 days') IS business_date),
+    description TEXT NOT NULL CHECK (length(trim(description)) > 0),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+    deleted_at TEXT,
+    deleted_by TEXT,
+    deletion_reason TEXT,
+    CHECK ((is_deleted = 0 AND deleted_at IS NULL AND deleted_by IS NULL AND deletion_reason IS NULL) OR
+        (is_deleted = 1 AND deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND deletion_reason IS NOT NULL AND length(trim(deletion_reason)) > 0))
+) STRICT;
+
 CREATE TABLE operation_history (
     id TEXT PRIMARY KEY NOT NULL,
     sale_id TEXT REFERENCES sales(id) ON DELETE RESTRICT,
     receipt_id TEXT REFERENCES receipts(id) ON DELETE RESTRICT,
+    transfer_id TEXT REFERENCES transfers(id) ON DELETE RESTRICT,
     operation_type TEXT NOT NULL CHECK (operation_type IN ('created', 'updated', 'deleted')),
     actor TEXT NOT NULL CHECK (length(trim(actor)) > 0),
     changed_at TEXT NOT NULL,
     changes_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(changes_json) AND json_type(changes_json) = 'array'),
-    CHECK ((sale_id IS NOT NULL) + (receipt_id IS NOT NULL) = 1)
+    CHECK ((sale_id IS NOT NULL) + (receipt_id IS NOT NULL) + (transfer_id IS NOT NULL) = 1)
 ) STRICT;
 
 CREATE INDEX customers_archive_name ON customers(is_archived, name);
@@ -98,8 +118,11 @@ CREATE INDEX sales_customer ON sales(customer_id, is_deleted, sale_date);
 CREATE INDEX sales_product ON sales(product_id);
 CREATE INDEX receipts_register ON receipts(is_deleted, business_date, created_at);
 CREATE INDEX receipts_customer ON receipts(customer_id, is_deleted, business_date);
+CREATE INDEX transfers_register ON transfers(is_deleted, business_date, created_at);
+CREATE INDEX transfers_customer ON transfers(customer_id, is_deleted, business_date);
 CREATE INDEX history_sale ON operation_history(sale_id, changed_at);
 CREATE INDEX history_receipt ON operation_history(receipt_id, changed_at);
+CREATE INDEX history_transfer ON operation_history(transfer_id, changed_at);
 
-INSERT INTO app_metadata(key, value) VALUES ('schema_version', '3');
-PRAGMA user_version = 3;
+INSERT INTO app_metadata(key, value) VALUES ('schema_version', '4');
+PRAGMA user_version = 4;

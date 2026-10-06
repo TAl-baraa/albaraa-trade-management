@@ -10,10 +10,11 @@ import { ProductsPage } from './pages/ProductsPage'
 import { ReceiptRegisterPage } from './pages/ReceiptRegisterPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { BackupSettingsPage } from './pages/BackupSettingsPage'
+import { TransferRegisterPage } from './pages/TransferRegisterPage'
 import { authRepository, type AuthSession } from './repositories/authRepository'
 import { repositoryError } from './repositories/tauriBridge'
 
-export type AppPage = 'dashboard' | 'customers' | 'products' | 'dailySales' | 'receipts' | 'backup'
+export type AppPage = 'dashboard' | 'customers' | 'products' | 'dailySales' | 'receipts' | 'transfers' | 'backup'
 
 function App() {
   const [authMode, setAuthMode] = useState<'checking' | 'setup' | 'login'>('checking')
@@ -60,6 +61,7 @@ function App() {
       {currentPage === 'products' && <ProductsPage />}
       {currentPage === 'dailySales' && <DailySalesPage />}
       {currentPage === 'receipts' && <ReceiptRegisterPage />}
+      {currentPage === 'transfers' && <TransferRegisterPage />}
       {currentPage === 'backup' && <BackupSettingsPage onRestored={handleRestore} />}
     </AppShell>
     {changingPassword && <ChangePasswordDialog onClose={() => setChangingPassword(false)} onChanged={() => { setChangingPassword(false); setPasswordChanged(true) }} />}

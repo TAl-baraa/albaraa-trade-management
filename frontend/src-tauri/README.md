@@ -18,12 +18,12 @@ dependencies.
 `npm run tauri -- build` runs `npm run build`, embeds `../dist`, and builds an
 NSIS installer. The included icons are the default Tauri placeholder icons.
 
-Customers, products, sales and receipts use SQLite through typed Tauri commands exclusively.
+Customers, products, sales, receipts and transfers use SQLite through typed Tauri commands exclusively.
 Browser-only development displays an Arabic desktop-app requirement instead of
 falling back to localStorage. Existing browser business data is disposable and is
 not imported. Local single-user authentication and safe manual backup/restore are implemented.
 
-## SQLite infrastructure (schema version 3)
+## SQLite infrastructure (schema version 4)
 
 `rusqlite` with its `bundled` feature compiles SQLite into the application; the
 customer does not install a separate database service or SQLite runtime.
@@ -50,7 +50,8 @@ than resetting data automatically.
 | `products` | ID, name, unique normalized name, notes, archive state, creation/update timestamps |
 | `sales` | Customer/product foreign keys and name snapshots, decimal tons and unit price, driver, currency, total, sale business date, review state, timestamps and soft-deletion metadata |
 | `receipts` | Customer foreign key/name snapshot, amount/currency, business date, notes, timestamps and soft-deletion metadata |
-| `operation_history` | ID, exactly one sale/receipt foreign key, operation type, actor display name, timestamp, ordered JSON field changes |
+| `transfers` | Customer foreign key/name snapshot, amount/currency, business date, required description, optional notes, timestamps and soft-deletion metadata |
+| `operation_history` | ID, exactly one sale/receipt/transfer foreign key, operation type, actor display name, timestamp, ordered JSON field changes |
 
 All tables are STRICT. IDs remain text so existing UUID-style ID conventions can
 be retained. Actor/deleted-by values are display names, not user accounts.
@@ -144,6 +145,8 @@ exposed to the webview.
 - `create_sale`, `update_sale`, `soft_delete_sale`, `toggle_sale_reviewed`.
 - `list_receipts`, `list_receipts_by_business_date`, `get_receipt`.
 - `create_receipt`, `update_receipt`, `soft_delete_receipt`.
+- `list_transfers`, `list_transfers_by_business_date`, `get_transfer`.
+- `create_transfer`, `update_transfer`, `soft_delete_transfer`.
 
 Rust creates IDs and UTC timestamps. Updates preserve creation timestamps,
 archive state and historical customer fields. Customer balances use the existing
@@ -152,7 +155,7 @@ accounting operations), with finite/safe-integer validation. Product command
 inputs contain only `name` and `notes`.
 
 Customer archiving requires both balances to be zero. Permanent deletion also
-requires no history flag and no SQLite sales/receipts, including soft-deleted
+requires no history flag and no SQLite sales/receipts/transfers, including soft-deleted
 records. Reactivation preserves all balances/history. Product archiving has no
 additional restrictions. Rust derives normalized names using trim, Unicode NFKC
 and lowercase; SQLite's unique constraint applies to active and archived names.
@@ -182,7 +185,7 @@ Manual backups use SQLite's online backup API while the live database is open.
 Files are named `albaraa-backup-YYYY-MM-DD-HHMMSS.db`; a numeric suffix prevents
 overwriting when multiple backups are created in the same second. Before success
 is reported, the result is reopened read-only, checked with `PRAGMA integrity_check`,
-and verified for schema version 3, matching metadata and all expected tables.
+and verified for schema version 4, matching metadata and all expected tables.
 
 Restore accepts a `.db` file from any accessible location. Validation happens
 before the live database is touched. The app then creates and validates a safety
@@ -213,7 +216,22 @@ backup or restore requested during another backup operation returns a clear Arab
 busy message. Automatic failures are stored as `last_auto_backup_error` and shown
 non-intrusively on the backup page without blocking application use.
 
-## Atomic Sales and Receipts
+## Customer statement PDF sharing
+
+The customer account dialog keeps its existing browser print action. Its Windows
+share action prints the same approved print-only DOM and CSS to a real A4 portrait
+PDF through WebView2 `PrintToPdf`, then attaches only that PDF to the native Windows
+Share Sheet through `IDataTransferManagerInterop`. The application does not use a
+WhatsApp API, select a recipient, upload the statement, or expose the SQLite file.
+
+Statement files are named `كشف حساب - <customer>.pdf` after removing Windows-invalid
+filename characters. They are written below the Tauri application cache directory
+in `statement-pdfs`; only matching statement PDFs older than 24 hours are removed.
+If the Windows Share Sheet cannot open, the generated PDF is opened with the system
+PDF application so the user can save or share it manually. WhatsApp appears only
+when Windows exposes it as an installed share target.
+
+## Atomic Sales, Receipts and Transfers
 
 Sales creation, updates and soft deletion are native SQLite transactions. Rust
 validates references, currency, positive decimal inputs, dates and the calculated
@@ -227,3 +245,11 @@ credit. Updates reverse the original effect before applying the replacement, and
 deletion restores the original amount. Customer deletion relies on SQLite foreign
 keys and history checks. The legacy accounting bridge and browser-storage
 repositories have been removed. No old test data is migrated.
+
+Transfers use their own table and register. Creation increases the selected
+customer balance, updates reverse the original effect before applying the new
+effect, and soft deletion reverses the amount. Each mutation stores audit history
+in the same transaction. IQD and USD remain separate. Schema version 4 migrates
+version 3 databases in place, preserving existing business, authentication and
+backup metadata. Customer statements treat transfers as debit transactions and
+show their required description without inventing product, driver or price data.

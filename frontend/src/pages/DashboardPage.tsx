@@ -1,4 +1,4 @@
-import { Archive, BookOpenText, CircleDollarSign, Coins, RefreshCw, ReceiptText, Users } from 'lucide-react'
+import { Archive, ArrowLeftRight, BookOpenText, CircleDollarSign, Coins, RefreshCw, ReceiptText, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { SummaryCard } from '../components/customers/SummaryCard'
 import { DailyActivitySummary } from '../components/dashboard/DailyActivitySummary'
@@ -7,6 +7,7 @@ import { HighDebtCustomers } from '../components/dashboard/HighDebtCustomers'
 import { RecentActivityList } from '../components/dashboard/RecentActivityList'
 import { customerRepository } from '../repositories/customerRepository'
 import { receiptRepository } from '../repositories/receiptRepository'
+import { transferRepository } from '../repositories/transferRepository'
 import { saleRepository } from '../repositories/saleRepository'
 import { buildDashboardSummary, type DashboardSummary } from '../services/dashboardService'
 import { getLocalDateString } from '../utils/date'
@@ -17,7 +18,7 @@ type DashboardState = { ok: true; summary: DashboardSummary } | { ok: false }
 
 const loadDashboard = async (): Promise<DashboardState> => {
   try {
-    return { ok: true, summary: buildDashboardSummary(await customerRepository.getAll(), await saleRepository.getAll(), await receiptRepository.getAll(), getLocalDateString()) }
+    return { ok: true, summary: buildDashboardSummary(await customerRepository.getAll(), await saleRepository.getAll(), await receiptRepository.getAll(), await transferRepository.getAll(), getLocalDateString()) }
   } catch {
     return { ok: false }
   }
@@ -42,6 +43,7 @@ export function DashboardPage() {
       <div className="dashboard-grid">
         <DailyActivitySummary title="مبيعات اليوم" countLabel="عدد عمليات البيع" activity={state.summary.sales} icon={BookOpenText} />
         <DailyActivitySummary title="الواصل اليوم" countLabel="عدد عمليات الاستلام" activity={state.summary.receipts} icon={ReceiptText} />
+        <DailyActivitySummary title="الحوالات اليوم" countLabel="عدد الحوالات" activity={state.summary.transfers} icon={ArrowLeftRight} />
       </div>
       <div className="dashboard-grid dashboard-grid--accounts">
         <DashboardSection title="الزبائن"><div className="dashboard-metrics"><SummaryCard label="الزبائن النشطون" value={formatNumber(state.summary.activeCustomers)} icon={Users} /><SummaryCard label="الزبائن المؤرشفون" value={formatNumber(state.summary.archivedCustomers)} icon={Archive} /></div></DashboardSection>

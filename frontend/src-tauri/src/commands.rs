@@ -1,4 +1,6 @@
-use crate::database::{self, auth, backup, customers, products, receipts, records::*, sales};
+use crate::database::{
+    self, auth, backup, customers, products, receipts, records::*, sales, transfers,
+};
 use std::{path::PathBuf, sync::Arc};
 use tauri::State;
 
@@ -261,4 +263,51 @@ pub fn soft_delete_receipt(
     reason: String,
 ) -> RepositoryResult<ReceiptMutation> {
     receipts::soft_delete(&mut connect(&state)?, &id, &reason)
+}
+
+#[tauri::command]
+pub fn list_transfers(state: State<'_, DatabaseDirectory>) -> RepositoryResult<Vec<Transfer>> {
+    transfers::list(&connect(&state)?, None)
+}
+
+#[tauri::command]
+pub fn list_transfers_by_business_date(
+    state: State<'_, DatabaseDirectory>,
+    business_date: String,
+) -> RepositoryResult<Vec<Transfer>> {
+    transfers::list(&connect(&state)?, Some(&business_date))
+}
+
+#[tauri::command]
+pub fn get_transfer(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+) -> RepositoryResult<Option<Transfer>> {
+    transfers::get(&connect(&state)?, &id)
+}
+
+#[tauri::command]
+pub fn create_transfer(
+    state: State<'_, DatabaseDirectory>,
+    input: TransferInput,
+) -> RepositoryResult<TransferMutation> {
+    transfers::create(&mut connect(&state)?, input)
+}
+
+#[tauri::command]
+pub fn update_transfer(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+    input: TransferInput,
+) -> RepositoryResult<TransferMutation> {
+    transfers::update(&mut connect(&state)?, &id, input)
+}
+
+#[tauri::command]
+pub fn soft_delete_transfer(
+    state: State<'_, DatabaseDirectory>,
+    id: String,
+    reason: String,
+) -> RepositoryResult<TransferMutation> {
+    transfers::soft_delete(&mut connect(&state)?, &id, &reason)
 }

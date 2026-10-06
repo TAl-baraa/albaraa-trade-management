@@ -8,18 +8,20 @@ pub mod records;
 #[cfg(test)]
 mod repository_tests;
 pub mod sales;
+pub mod transfers;
 use std::{error::Error, fs, io, path::Path, time::Duration};
 
 pub(crate) const DATABASE_FILE_NAME: &str = "albaraa.db";
-pub(crate) const SCHEMA_VERSION: i64 = 3;
+pub(crate) const SCHEMA_VERSION: i64 = 4;
 const SCHEMA: &str = include_str!("schema.sql");
-pub(crate) const TABLES: [&str; 7] = [
+pub(crate) const TABLES: [&str; 8] = [
     "app_metadata",
     "local_user",
     "customers",
     "products",
     "sales",
     "receipts",
+    "transfers",
     "operation_history",
 ];
 
@@ -57,7 +59,9 @@ pub fn initialize(app_data_dir: &Path) -> Result<Connection, Box<dyn Error>> {
                 UPDATE app_metadata SET value = '3', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE key = 'schema_version';
                 PRAGMA user_version = 3;",
             )?;
+            migrate_v3_to_v4(&transaction)?;
         }
+        3 => migrate_v3_to_v4(&transaction)?,
         SCHEMA_VERSION => {}
         _ => return Err(io::Error::other("إصدار قاعدة البيانات غير مدعوم").into()),
     }
@@ -74,6 +78,51 @@ pub fn initialize(app_data_dir: &Path) -> Result<Connection, Box<dyn Error>> {
     }
     transaction.commit()?;
     Ok(connection)
+}
+
+fn migrate_v3_to_v4(transaction: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
+    transaction.execute_batch(
+        "CREATE TABLE transfers (
+            id TEXT PRIMARY KEY NOT NULL,
+            customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+            customer_name_snapshot TEXT NOT NULL,
+            amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+            currency TEXT NOT NULL CHECK (currency IN ('IQD', 'USD')),
+            business_date TEXT NOT NULL CHECK (length(business_date) = 10 AND business_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND date(business_date, '+0 days') IS business_date),
+            description TEXT NOT NULL CHECK (length(trim(description)) > 0),
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+            deleted_at TEXT,
+            deleted_by TEXT,
+            deletion_reason TEXT,
+            CHECK ((is_deleted = 0 AND deleted_at IS NULL AND deleted_by IS NULL AND deletion_reason IS NULL) OR
+                (is_deleted = 1 AND deleted_at IS NOT NULL AND deleted_by IS NOT NULL AND deletion_reason IS NOT NULL AND length(trim(deletion_reason)) > 0))
+        ) STRICT;
+        CREATE TABLE operation_history_v4 (
+            id TEXT PRIMARY KEY NOT NULL,
+            sale_id TEXT REFERENCES sales(id) ON DELETE RESTRICT,
+            receipt_id TEXT REFERENCES receipts(id) ON DELETE RESTRICT,
+            transfer_id TEXT REFERENCES transfers(id) ON DELETE RESTRICT,
+            operation_type TEXT NOT NULL CHECK (operation_type IN ('created', 'updated', 'deleted')),
+            actor TEXT NOT NULL CHECK (length(trim(actor)) > 0),
+            changed_at TEXT NOT NULL,
+            changes_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(changes_json) AND json_type(changes_json) = 'array'),
+            CHECK ((sale_id IS NOT NULL) + (receipt_id IS NOT NULL) + (transfer_id IS NOT NULL) = 1)
+        ) STRICT;
+        INSERT INTO operation_history_v4(id, sale_id, receipt_id, operation_type, actor, changed_at, changes_json)
+            SELECT id, sale_id, receipt_id, operation_type, actor, changed_at, changes_json FROM operation_history;
+        DROP TABLE operation_history;
+        ALTER TABLE operation_history_v4 RENAME TO operation_history;
+        CREATE INDEX transfers_register ON transfers(is_deleted, business_date, created_at);
+        CREATE INDEX transfers_customer ON transfers(customer_id, is_deleted, business_date);
+        CREATE INDEX history_sale ON operation_history(sale_id, changed_at);
+        CREATE INDEX history_receipt ON operation_history(receipt_id, changed_at);
+        CREATE INDEX history_transfer ON operation_history(transfer_id, changed_at);
+        UPDATE app_metadata SET value = '4', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE key = 'schema_version';
+        PRAGMA user_version = 4;",
+    )
 }
 
 #[cfg(test)]
@@ -148,6 +197,7 @@ mod tests {
         connection.execute("INSERT INTO products(id, name, normalized_name, created_at, updated_at) VALUES ('p', 'Original product', 'original product', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z')", []).unwrap();
         connection.execute("INSERT INTO customers(id, name, created_at, updated_at, iqd_balance_minor, usd_balance_minor) VALUES ('c', 'Customer', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z', 100, -250)", []).unwrap();
         connection.execute("INSERT INTO receipts(id, customer_id, customer_name_snapshot, amount_minor, currency, business_date, created_at, updated_at) VALUES ('r', 'c', 'Snapshot', 125, 'USD', '2026-10-05', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z')", []).unwrap();
+        connection.execute("INSERT INTO transfers(id, customer_id, customer_name_snapshot, amount_minor, currency, business_date, description, created_at, updated_at) VALUES ('t', 'c', 'Snapshot', 500, 'IQD', '2026-10-05', 'Transfer description', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z')", []).unwrap();
         connection.execute("INSERT INTO sales(id, customer_id, customer_name_snapshot, product_id, product_name_snapshot, weight_tons, driver_name, unit_sale_price, sale_currency, total_amount_minor, sale_date, created_at, updated_at) VALUES ('s', 'c', 'Customer snapshot', 'p', 'Product snapshot', '1.234567', 'Driver', '123.4567', 'IQD', 15242, '2026-10-05', '2026-10-05T00:00:00Z', '2026-10-05T00:00:00Z')", []).unwrap();
         connection
             .execute(
@@ -167,6 +217,9 @@ mod tests {
             "UPDATE receipts SET amount_minor = 1.25",
             "UPDATE receipts SET business_date = '2026-02-30'",
             "UPDATE receipts SET is_deleted = 1",
+            "UPDATE transfers SET currency = 'EUR'",
+            "UPDATE transfers SET description = '   '",
+            "UPDATE transfers SET is_deleted = 1",
             "UPDATE sales SET is_deleted = 1",
             "UPDATE sales SET weight_tons = '1.2.3'",
             "UPDATE sales SET unit_sale_price = '0.0'",

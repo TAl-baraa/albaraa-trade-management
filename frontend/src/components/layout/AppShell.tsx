@@ -1,4 +1,4 @@
-import { BookOpenText, Building2, DatabaseBackup, KeyRound, LayoutDashboard, LogOut, Menu, Package, ReceiptText, UserRound, Users, X } from 'lucide-react'
+import { ArrowLeftRight, BookOpenText, Building2, DatabaseBackup, KeyRound, LayoutDashboard, LogOut, Menu, Package, ReceiptText, UserRound, Users, X } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import type { AppPage } from '../../App'
 
@@ -58,6 +58,7 @@ export function AppShell({ children, currentPage, username, isNavigationOpen, on
           <button className={`nav-item ${currentPage === 'dashboard' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'dashboard' ? 'page' : undefined} onClick={() => { onNavigate('dashboard'); onNavigationClose() }}><LayoutDashboard size={20} /><span>لوحة المتابعة</span></button>
           <button className={`nav-item ${currentPage === 'dailySales' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'dailySales' ? 'page' : undefined} onClick={() => { onNavigate('dailySales'); onNavigationClose() }}><BookOpenText size={20} /><span>السجل اليومي للمبيعات</span></button>
           <button className={`nav-item ${currentPage === 'receipts' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'receipts' ? 'page' : undefined} onClick={() => { onNavigate('receipts'); onNavigationClose() }}><ReceiptText size={20} /><span>سجل الواصل</span></button>
+          <button className={`nav-item ${currentPage === 'transfers' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'transfers' ? 'page' : undefined} onClick={() => { onNavigate('transfers'); onNavigationClose() }}><ArrowLeftRight size={20} /><span>سجل الحوالات</span></button>
           <button className={`nav-item ${currentPage === 'customers' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'customers' ? 'page' : undefined} onClick={() => { onNavigate('customers'); onNavigationClose() }}><Users size={20} /><span>إدارة الزبائن</span></button>
           <button className={`nav-item ${currentPage === 'products' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'products' ? 'page' : undefined} onClick={() => { onNavigate('products'); onNavigationClose() }}><Package size={20} /><span>إدارة المنتجات</span></button>
           <button className={`nav-item ${currentPage === 'backup' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'backup' ? 'page' : undefined} onClick={() => { onNavigate('backup'); onNavigationClose() }}><DatabaseBackup size={20} /><span>النسخ الاحتياطي والاستعادة</span></button>

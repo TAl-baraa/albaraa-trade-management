@@ -1,4 +1,4 @@
-use super::{auth, customers, initialize, products, receipts, records::*, sales};
+use super::{auth, customers, initialize, products, receipts, records::*, sales, transfers};
 use std::{
     fs,
     path::PathBuf,
@@ -74,6 +74,146 @@ fn receipt_input(customer_id: &str, amount: &str, currency: &str) -> ReceiptInpu
         business_date: "2026-10-05".into(),
         notes: "ملاحظة الواصل".into(),
     }
+}
+
+fn transfer_input(customer_id: &str, amount: &str, currency: &str) -> TransferInput {
+    TransferInput {
+        customer_id: customer_id.into(),
+        amount: amount.into(),
+        currency: currency.into(),
+        business_date: "2026-10-05".into(),
+        description: "حوالة اختبار".into(),
+        notes: "ملاحظة الحوالة".into(),
+    }
+}
+
+#[test]
+fn transfers_atomic_lifecycle_snapshots_history_and_restart() {
+    let directory = TestDirectory::new();
+    let mut connection = initialize(&directory.0).unwrap();
+    assert!(transfers::list(&connection, None).unwrap().is_empty());
+    let first = customers::save(&connection, None, customer_input()).unwrap();
+    let mut second_input = customer_input();
+    second_input.name = "زبون ثانٍ".into();
+    let second = customers::save(&connection, None, second_input).unwrap();
+
+    let iqd = transfers::create(&mut connection, transfer_input(&first.id, "100", "IQD"))
+        .unwrap()
+        .transfer
+        .unwrap();
+    let usd = transfers::create(&mut connection, transfer_input(&first.id, "20", "USD"))
+        .unwrap()
+        .transfer
+        .unwrap();
+    assert_eq!(balances(&connection, &first.id), (10_000, 2_000));
+    assert_eq!(iqd.history.len(), 1);
+
+    let mut edited = transfer_input(&first.id, "150", "USD");
+    edited.business_date = "2026-10-06".into();
+    edited.description = "بيان معدل".into();
+    edited.notes = "ملاحظات معدلة".into();
+    let edited = transfers::update(&mut connection, &iqd.id, edited)
+        .unwrap()
+        .transfer
+        .unwrap();
+    assert_eq!(balances(&connection, &first.id), (0, 17_000));
+    assert_eq!(edited.customer_name_snapshot, first.name);
+    assert_eq!(edited.description, "بيان معدل");
+
+    let changed = transfers::update(
+        &mut connection,
+        &iqd.id,
+        transfer_input(&second.id, "50", "IQD"),
+    )
+    .unwrap()
+    .transfer
+    .unwrap();
+    assert_eq!(changed.customer_name_snapshot, second.name);
+    assert_eq!(balances(&connection, &first.id), (0, 2_000));
+    assert_eq!(balances(&connection, &second.id), (5_000, 0));
+
+    let deleted = transfers::soft_delete(&mut connection, &iqd.id, "اختبار الحذف")
+        .unwrap()
+        .transfer
+        .unwrap();
+    assert!(deleted.is_deleted);
+    assert_eq!(balances(&connection, &second.id), (0, 0));
+    assert!(customers::delete(&connection, &second.id).is_err());
+
+    let mut archived_input = customer_input();
+    archived_input.name = "زبون مؤرشف".into();
+    let archived = customers::save(&connection, None, archived_input).unwrap();
+    let archived_transfer =
+        transfers::create(&mut connection, transfer_input(&archived.id, "10", "IQD"))
+            .unwrap()
+            .transfer
+            .unwrap();
+    receipts::create(&mut connection, receipt_input(&archived.id, "10", "IQD")).unwrap();
+    customers::set_archived(&connection, &archived.id, true).unwrap();
+    let mut historical_edit = transfer_input(&archived.id, "10", "IQD");
+    historical_edit.notes = "تعديل مرجع مؤرشف".into();
+    let historical = transfers::update(&mut connection, &archived_transfer.id, historical_edit)
+        .unwrap()
+        .transfer
+        .unwrap();
+    assert_eq!(historical.customer_name_snapshot, archived.name);
+    assert_eq!(balances(&connection, &archived.id), (0, 0));
+
+    let integrity: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    let foreign_keys: i64 = connection
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    assert_eq!(foreign_keys, 0);
+    drop(connection);
+    let connection = initialize(&directory.0).unwrap();
+    assert_eq!(transfers::list(&connection, None).unwrap().len(), 3);
+    assert_eq!(
+        transfers::get(&connection, &usd.id)
+            .unwrap()
+            .unwrap()
+            .amount,
+        20.0
+    );
+}
+
+#[test]
+fn transfer_failures_roll_back_record_balance_and_history() {
+    let directory = TestDirectory::new();
+    let mut connection = initialize(&directory.0).unwrap();
+    let customer = customers::save(&connection, None, customer_input()).unwrap();
+    assert!(transfers::create(&mut connection, transfer_input("missing", "10", "IQD")).is_err());
+    let mut invalid = transfer_input(&customer.id, "10", "IQD");
+    invalid.description = " ".into();
+    assert!(transfers::create(&mut connection, invalid).is_err());
+    connection.execute_batch("CREATE TRIGGER fail_transfer_history BEFORE INSERT ON operation_history WHEN NEW.transfer_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'test rollback'); END;").unwrap();
+    assert!(transfers::create(&mut connection, transfer_input(&customer.id, "25", "IQD")).is_err());
+    assert!(transfers::list(&connection, None).unwrap().is_empty());
+    assert_eq!(balances(&connection, &customer.id), (0, 0));
+    connection
+        .execute_batch("DROP TRIGGER fail_transfer_history;")
+        .unwrap();
+    let created = transfers::create(&mut connection, transfer_input(&customer.id, "25", "IQD"))
+        .unwrap()
+        .transfer
+        .unwrap();
+    connection.execute_batch("CREATE TRIGGER fail_transfer_update BEFORE INSERT ON operation_history WHEN NEW.transfer_id IS NOT NULL AND NEW.operation_type='updated' BEGIN SELECT RAISE(ABORT, 'test rollback'); END;").unwrap();
+    assert!(
+        transfers::update(
+            &mut connection,
+            &created.id,
+            transfer_input(&customer.id, "40", "USD")
+        )
+        .is_err()
+    );
+    let unchanged = transfers::get(&connection, &created.id).unwrap().unwrap();
+    assert_eq!(unchanged.amount, 25.0);
+    assert_eq!(unchanged.history.len(), 1);
+    assert_eq!(balances(&connection, &customer.id), (2_500, 0));
 }
 
 fn balances(connection: &rusqlite::Connection, customer_id: &str) -> (i64, i64) {
@@ -667,23 +807,35 @@ fn local_auth_lifecycle_and_restart() {
 }
 
 #[test]
-fn schema_two_migrates_to_local_auth_without_losing_data() {
+fn schema_three_migrates_to_transfers_without_losing_data() {
     let directory = TestDirectory::new();
-    let connection = initialize(&directory.0).unwrap();
+    let mut connection = initialize(&directory.0).unwrap();
     connection
         .execute(
             "INSERT INTO app_metadata(key, value) VALUES ('retained_setting', 'yes')",
             [],
         )
         .unwrap();
-    connection.execute("DROP TABLE local_user", []).unwrap();
-    connection
-        .execute(
-            "UPDATE app_metadata SET value='2' WHERE key='schema_version'",
-            [],
-        )
-        .unwrap();
-    connection.pragma_update(None, "user_version", 2).unwrap();
+    auth::create_first(&mut connection, create_account_input("admin", "password-1")).unwrap();
+    let customer = customers::save(&connection, None, customer_input()).unwrap();
+    let product = products::save(&connection, None, product_input("منتج الترحيل")).unwrap();
+    sales::create(
+        &mut connection,
+        sale_input(&customer.id, &product.id, "1", "10", "IQD"),
+    )
+    .unwrap();
+    receipts::create(&mut connection, receipt_input(&customer.id, "2", "IQD")).unwrap();
+    connection.execute_batch("CREATE TABLE operation_history_v3 (
+            id TEXT PRIMARY KEY NOT NULL, sale_id TEXT REFERENCES sales(id) ON DELETE RESTRICT,
+            receipt_id TEXT REFERENCES receipts(id) ON DELETE RESTRICT,
+            operation_type TEXT NOT NULL CHECK (operation_type IN ('created', 'updated', 'deleted')),
+            actor TEXT NOT NULL CHECK (length(trim(actor)) > 0), changed_at TEXT NOT NULL,
+            changes_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(changes_json) AND json_type(changes_json) = 'array'),
+            CHECK ((sale_id IS NOT NULL) + (receipt_id IS NOT NULL) = 1)) STRICT;
+        INSERT INTO operation_history_v3 SELECT id, sale_id, receipt_id, operation_type, actor, changed_at, changes_json FROM operation_history WHERE transfer_id IS NULL;
+        DROP TABLE operation_history; ALTER TABLE operation_history_v3 RENAME TO operation_history;
+        DROP TABLE transfers;
+        UPDATE app_metadata SET value='3' WHERE key='schema_version'; PRAGMA user_version=3;").unwrap();
     drop(connection);
 
     let connection = initialize(&directory.0).unwrap();
@@ -704,8 +856,20 @@ fn schema_two_migrates_to_local_auth_without_losing_data() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 3);
-    assert_eq!(metadata_version, "3");
+    assert_eq!(version, 4);
+    assert_eq!(metadata_version, "4");
     assert_eq!(retained, "yes");
-    assert!(!auth::status(&connection).unwrap().has_account);
+    assert!(transfers::list(&connection, None).unwrap().is_empty());
+    assert_eq!(customers::list(&connection, None).unwrap().len(), 1);
+    assert_eq!(products::list(&connection, None).unwrap().len(), 1);
+    assert_eq!(sales::list(&connection, None).unwrap().len(), 1);
+    assert_eq!(receipts::list(&connection, None).unwrap().len(), 1);
+    assert_eq!(
+        connection
+            .query_row("SELECT count(*) FROM operation_history", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert!(auth::login(&connection, login_input("admin", "password-1")).is_ok());
 }

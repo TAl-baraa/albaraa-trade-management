@@ -24,3 +24,15 @@ unicode-normalization = "0.1"
 tauri = { version = "2.12.1", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "=0.39.1"
+windows-collections = "0.3.2"
+windows = { version = "0.62.2", features = [
+  "ApplicationModel_DataTransfer",
+  "Foundation",
+  "Storage",
+  "Storage_Streams",
+  "Win32_Foundation",
+  "Win32_UI_Shell",
+] }
