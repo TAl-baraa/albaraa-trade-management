@@ -7,6 +7,10 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            commands::auth_status,
+            commands::create_first_user,
+            commands::verify_login,
+            commands::change_password,
             commands::list_customers,
             commands::get_customer,
             commands::create_customer,

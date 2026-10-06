@@ -1,4 +1,5 @@
 use rusqlite::{Connection, TransactionBehavior};
+pub mod auth;
 pub mod customers;
 pub mod products;
 pub mod receipts;
@@ -8,10 +9,11 @@ mod repository_tests;
 pub mod sales;
 use std::{error::Error, fs, io, path::Path, time::Duration};
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const SCHEMA: &str = include_str!("schema.sql");
-const TABLES: [&str; 6] = [
+const TABLES: [&str; 7] = [
     "app_metadata",
+    "local_user",
     "customers",
     "products",
     "sales",
@@ -40,6 +42,19 @@ pub fn initialize(app_data_dir: &Path) -> Result<Connection, Box<dyn Error>> {
                 return Err(io::Error::other("قاعدة البيانات غير مهيأة بإصدار معروف").into());
             }
             transaction.execute_batch(SCHEMA)?;
+        }
+        2 => {
+            transaction.execute_batch(
+                "CREATE TABLE local_user (
+                    id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+                    username TEXT NOT NULL CHECK (length(trim(username)) > 0),
+                    password_hash TEXT NOT NULL CHECK (length(password_hash) > 0),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                ) STRICT;
+                UPDATE app_metadata SET value = '3', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE key = 'schema_version';
+                PRAGMA user_version = 3;",
+            )?;
         }
         SCHEMA_VERSION => {}
         _ => return Err(io::Error::other("إصدار قاعدة البيانات غير مدعوم").into()),

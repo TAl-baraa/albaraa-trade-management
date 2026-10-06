@@ -4,6 +4,14 @@ CREATE TABLE app_metadata (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 ) STRICT;
 
+CREATE TABLE local_user (
+    id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+    username TEXT NOT NULL CHECK (length(trim(username)) > 0),
+    password_hash TEXT NOT NULL CHECK (length(password_hash) > 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE customers (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL CHECK (length(trim(name)) > 0),
@@ -93,5 +101,5 @@ CREATE INDEX receipts_customer ON receipts(customer_id, is_deleted, business_dat
 CREATE INDEX history_sale ON operation_history(sale_id, changed_at);
 CREATE INDEX history_receipt ON operation_history(receipt_id, changed_at);
 
-INSERT INTO app_metadata(key, value) VALUES ('schema_version', '2');
-PRAGMA user_version = 2;
+INSERT INTO app_metadata(key, value) VALUES ('schema_version', '3');
+PRAGMA user_version = 3;

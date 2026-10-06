@@ -1,17 +1,20 @@
-import { BookOpenText, Building2, LayoutDashboard, Menu, Package, ReceiptText, Users, X } from 'lucide-react'
+import { BookOpenText, Building2, KeyRound, LayoutDashboard, LogOut, Menu, Package, ReceiptText, UserRound, Users, X } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import type { AppPage } from '../../App'
 
 interface AppShellProps {
   children: ReactNode
   currentPage: AppPage
+  username: string
   isNavigationOpen: boolean
   onNavigate: (page: AppPage) => void
   onNavigationToggle: () => void
   onNavigationClose: () => void
+  onChangePassword: () => void
+  onLogout: () => void
 }
 
-export function AppShell({ children, currentPage, isNavigationOpen, onNavigate, onNavigationToggle, onNavigationClose }: AppShellProps) {
+export function AppShell({ children, currentPage, username, isNavigationOpen, onNavigate, onNavigationToggle, onNavigationClose, onChangePassword, onLogout }: AppShellProps) {
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && isNavigationOpen && !document.body.classList.contains('modal-open')) onNavigationClose()
@@ -58,6 +61,7 @@ export function AppShell({ children, currentPage, isNavigationOpen, onNavigate, 
           <button className={`nav-item ${currentPage === 'customers' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'customers' ? 'page' : undefined} onClick={() => { onNavigate('customers'); onNavigationClose() }}><Users size={20} /><span>إدارة الزبائن</span></button>
           <button className={`nav-item ${currentPage === 'products' ? 'nav-item--active' : ''}`} type="button" aria-current={currentPage === 'products' ? 'page' : undefined} onClick={() => { onNavigate('products'); onNavigationClose() }}><Package size={20} /><span>إدارة المنتجات</span></button>
         </nav>
+        <div className="sidebar-session"><div className="sidebar-session__user"><UserRound size={18} /><span><small>المستخدم الحالي</small><strong>{username}</strong></span></div><button type="button" onClick={onChangePassword}><KeyRound size={18} />تغيير كلمة المرور</button><button type="button" onClick={onLogout}><LogOut size={18} />تسجيل الخروج</button></div>
       </aside>
       <main className="main-content">{children}</main>
     </div>

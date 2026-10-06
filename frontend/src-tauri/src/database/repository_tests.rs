@@ -1,4 +1,4 @@
-use super::{customers, initialize, products, receipts, records::*, sales};
+use super::{auth, customers, initialize, products, receipts, records::*, sales};
 use std::{
     fs,
     path::PathBuf,
@@ -84,6 +84,20 @@ fn balances(connection: &rusqlite::Connection, customer_id: &str) -> (i64, i64) 
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap()
+}
+
+fn create_account_input(username: &str, password: &str) -> auth::CreateAccountInput {
+    auth::CreateAccountInput {
+        username: username.into(),
+        password: password.into(),
+    }
+}
+
+fn login_input(username: &str, password: &str) -> auth::LoginInput {
+    auth::LoginInput {
+        username: username.into(),
+        password: password.into(),
+    }
 }
 
 #[test]
@@ -574,4 +588,124 @@ fn receipt_failures_roll_back_record_balance_and_history() {
     assert_eq!(unchanged.amount, 25.0);
     assert_eq!(unchanged.history.len(), 1);
     assert_eq!(balances(&connection, &customer.id), (-2_500, 0));
+}
+
+#[test]
+fn local_auth_lifecycle_and_restart() {
+    let directory = TestDirectory::new();
+    let mut connection = initialize(&directory.0).unwrap();
+    assert!(!auth::status(&connection).unwrap().has_account);
+    assert!(auth::create_first(&mut connection, create_account_input(" ", "password1")).is_err());
+    assert!(auth::create_first(&mut connection, create_account_input("admin", "short")).is_err());
+
+    let session = auth::create_first(
+        &mut connection,
+        create_account_input("  مدير النظام  ", "first-pass-1"),
+    )
+    .unwrap();
+    assert_eq!(session.username, "مدير النظام");
+    assert!(auth::status(&connection).unwrap().has_account);
+    assert!(
+        auth::create_first(
+            &mut connection,
+            create_account_input("other", "second-pass-2")
+        )
+        .is_err()
+    );
+
+    let stored_hash: String = connection
+        .query_row(
+            "SELECT password_hash FROM local_user WHERE id=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_ne!(stored_hash, "first-pass-1");
+    assert!(stored_hash.starts_with("$argon2"));
+    let status_json = serde_json::to_string(&auth::status(&connection).unwrap()).unwrap();
+    let session_json = serde_json::to_string(&session).unwrap();
+    assert_eq!(status_json, r#"{"hasAccount":true}"#);
+    assert_eq!(session_json, r#"{"username":"مدير النظام"}"#);
+    assert!(!status_json.contains("password"));
+    assert!(!session_json.contains("password"));
+
+    assert_eq!(
+        auth::login(&connection, login_input("مدير النظام", "first-pass-1"))
+            .unwrap()
+            .username,
+        "مدير النظام"
+    );
+    assert!(auth::login(&connection, login_input("مدير النظام", "wrong-pass")).is_err());
+    assert!(auth::login(&connection, login_input("wrong-user", "first-pass-1")).is_err());
+
+    assert!(
+        auth::change_password(
+            &mut connection,
+            auth::ChangePasswordInput {
+                current_password: "wrong-pass".into(),
+                new_password: "second-pass-2".into(),
+            }
+        )
+        .is_err()
+    );
+    assert!(auth::login(&connection, login_input("مدير النظام", "first-pass-1")).is_ok());
+    auth::change_password(
+        &mut connection,
+        auth::ChangePasswordInput {
+            current_password: "first-pass-1".into(),
+            new_password: "second-pass-2".into(),
+        },
+    )
+    .unwrap();
+    assert!(auth::login(&connection, login_input("مدير النظام", "first-pass-1")).is_err());
+    assert!(auth::login(&connection, login_input("مدير النظام", "second-pass-2")).is_ok());
+    drop(connection);
+
+    let connection = initialize(&directory.0).unwrap();
+    assert!(auth::status(&connection).unwrap().has_account);
+    assert!(auth::login(&connection, login_input("مدير النظام", "second-pass-2")).is_ok());
+}
+
+#[test]
+fn schema_two_migrates_to_local_auth_without_losing_data() {
+    let directory = TestDirectory::new();
+    let connection = initialize(&directory.0).unwrap();
+    connection
+        .execute(
+            "INSERT INTO app_metadata(key, value) VALUES ('retained_setting', 'yes')",
+            [],
+        )
+        .unwrap();
+    connection.execute("DROP TABLE local_user", []).unwrap();
+    connection
+        .execute(
+            "UPDATE app_metadata SET value='2' WHERE key='schema_version'",
+            [],
+        )
+        .unwrap();
+    connection.pragma_update(None, "user_version", 2).unwrap();
+    drop(connection);
+
+    let connection = initialize(&directory.0).unwrap();
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    let metadata_version: String = connection
+        .query_row(
+            "SELECT value FROM app_metadata WHERE key='schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let retained: String = connection
+        .query_row(
+            "SELECT value FROM app_metadata WHERE key='retained_setting'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, 3);
+    assert_eq!(metadata_version, "3");
+    assert_eq!(retained, "yes");
+    assert!(!auth::status(&connection).unwrap().has_account);
 }

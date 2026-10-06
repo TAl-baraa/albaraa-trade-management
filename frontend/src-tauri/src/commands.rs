@@ -1,4 +1,4 @@
-use crate::database::{self, customers, products, receipts, records::*, sales};
+use crate::database::{self, auth, customers, products, receipts, records::*, sales};
 use std::path::PathBuf;
 use tauri::State;
 
@@ -8,6 +8,35 @@ fn connect(state: &DatabaseDirectory) -> RepositoryResult<rusqlite::Connection> 
         eprintln!("Database connection failed: {error}");
         "تعذر الاتصال بقاعدة البيانات.".into()
     })
+}
+
+#[tauri::command]
+pub fn auth_status(state: State<'_, DatabaseDirectory>) -> RepositoryResult<auth::AuthStatus> {
+    auth::status(&connect(&state)?)
+}
+
+#[tauri::command]
+pub fn create_first_user(
+    state: State<'_, DatabaseDirectory>,
+    input: auth::CreateAccountInput,
+) -> RepositoryResult<auth::AuthSession> {
+    auth::create_first(&mut connect(&state)?, input)
+}
+
+#[tauri::command]
+pub fn verify_login(
+    state: State<'_, DatabaseDirectory>,
+    input: auth::LoginInput,
+) -> RepositoryResult<auth::AuthSession> {
+    auth::login(&connect(&state)?, input)
+}
+
+#[tauri::command]
+pub fn change_password(
+    state: State<'_, DatabaseDirectory>,
+    input: auth::ChangePasswordInput,
+) -> RepositoryResult<()> {
+    auth::change_password(&mut connect(&state)?, input)
 }
 
 #[tauri::command]
