@@ -86,11 +86,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .printable-ledger { width: 100%; border-collapse: collapse; table-layout: fixed; direction: rtl; }
 .printable-ledger th, .printable-ledger td { padding: 6px 7px; border: 1px solid #333; vertical-align: middle; text-align: right; }
 .printable-ledger th { font-weight: 700; text-align: center; }
-.printable-ledger th:nth-child(1), .printable-ledger td:nth-child(1) { width: 15%; white-space: nowrap; }
-.printable-ledger th:nth-child(2), .printable-ledger td:nth-child(2) { width: 34%; }
+.printable-ledger th:nth-child(1), .printable-ledger td:nth-child(1) { width: 13%; white-space: nowrap; }
+.printable-ledger th:nth-child(2), .printable-ledger td:nth-child(2) { width: 24%; }
 .printable-ledger th:nth-child(3), .printable-ledger td:nth-child(3) { width: 16%; }
-.printable-ledger th:nth-child(4), .printable-ledger td:nth-child(4) { width: 17%; }
-.printable-ledger th:nth-child(5), .printable-ledger td:nth-child(5) { width: 18%; white-space: nowrap; font-weight: 700; }
+.printable-ledger th:nth-child(4), .printable-ledger td:nth-child(4) { width: 14%; }
+.printable-ledger th:nth-child(5), .printable-ledger td:nth-child(5) { width: 15%; }
+.printable-ledger th:nth-child(6), .printable-ledger td:nth-child(6) { width: 18%; white-space: nowrap; font-weight: 700; }
 .printable-ledger td small { display: block; font-size: 12px; font-weight: 400; }
 .printable-ledger__summary td, .printable-ledger__balance td, .printable-ledger__opening td, .printable-ledger tfoot th { font-weight: 700; }
 .printable-ledger__summary td, .printable-ledger__balance td, .printable-ledger tfoot td, .printable-ledger tfoot th { border-top-width: 2px; }
