@@ -1,4 +1,4 @@
-import { ArchiveRestore, FolderOpen, HardDrive, RefreshCw, Save } from 'lucide-react'
+import { ArchiveRestore, Clock3, FolderOpen, HardDrive, RefreshCw, Save } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { backupRepository, type BackupSettings } from '../repositories/backupRepository'
 import { repositoryError } from '../repositories/tauriBridge'
@@ -64,6 +64,11 @@ export function BackupSettingsPage({ onRestored }: BackupSettingsPageProps) {
       <div className="backup-card__heading"><HardDrive size={28} /><div><h2>مجلد النسخ الاحتياطي</h2><p>يمكن أن يكون مجلدًا محليًا أو وحدة USB أو مجلدًا تزامنه خدمة سحابية على الجهاز.</p></div></div>
       {loading ? <p role="status">جارٍ تحميل إعدادات النسخ الاحتياطي...</p> : <>
         <dl className="backup-details"><div><dt>المجلد الحالي</dt><dd dir="ltr">{settings?.backupDirectory ?? 'لم يتم اختيار مجلد بعد'}</dd></div><div><dt>آخر نسخة ناجحة</dt><dd>{formatDateTime(settings?.lastSuccessfulBackupAt ?? null)}</dd></div></dl>
+        <section className="automatic-backup-summary" aria-labelledby="automatic-backup-title">
+          <div className="automatic-backup-summary__heading"><Clock3 size={22} /><div><h3 id="automatic-backup-title">النسخ الاحتياطي التلقائي</h3><p>يعمل أثناء تشغيل التطبيق فقط.</p></div><span className={`status-badge ${settings?.automaticBackupAvailable ? 'status-badge--active' : 'status-badge--unavailable'}`}>{settings?.automaticBackupAvailable ? 'مفعّل' : 'غير متاح'}</span></div>
+          <dl><div><dt>الفاصل الزمني</dt><dd>كل 3 ساعات</dd></div><div><dt>آخر نسخة تلقائية ناجحة</dt><dd>{formatDateTime(settings?.lastSuccessfulAutoBackupAt ?? null)}</dd></div><div><dt>النسخ التلقائية المحتفظ بها</dt><dd>{settings?.automaticBackupCount ?? 0} من 20</dd></div></dl>
+          {settings?.automaticBackupWarning && <p className="backup-warning" role="status">{settings.automaticBackupWarning}</p>}
+        </section>
         <div className="backup-actions">
           <button className="button button--secondary" type="button" onClick={() => void chooseDirectory()} disabled={busy}><FolderOpen size={18} />{settings?.backupDirectory ? 'تغيير المجلد' : 'اختر مجلد النسخ الاحتياطي'}</button>
           <button className="button button--secondary" type="button" onClick={() => settings?.backupDirectory && void backupRepository.openDirectory(settings.backupDirectory).catch((reason) => setError(repositoryError(reason)))} disabled={busy || !settings?.backupDirectory}><FolderOpen size={18} />فتح مجلد النسخ الاحتياطي</button>

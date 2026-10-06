@@ -5,6 +5,10 @@ import { databaseCommand } from './tauriBridge'
 export interface BackupSettings {
   backupDirectory: string | null
   lastSuccessfulBackupAt: string | null
+  lastSuccessfulAutoBackupAt: string | null
+  automaticBackupAvailable: boolean
+  automaticBackupCount: number
+  automaticBackupWarning: string | null
 }
 
 export interface BackupResult {

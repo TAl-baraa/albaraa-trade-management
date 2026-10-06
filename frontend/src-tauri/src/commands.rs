@@ -1,10 +1,13 @@
 use crate::database::{self, auth, backup, customers, products, receipts, records::*, sales};
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 use tauri::State;
 
-pub struct DatabaseDirectory(pub PathBuf);
+pub struct DatabaseDirectory {
+    pub path: PathBuf,
+    pub backup_lock: Arc<backup::BackupOperationLock>,
+}
 fn connect(state: &DatabaseDirectory) -> RepositoryResult<rusqlite::Connection> {
-    database::initialize(&state.0).map_err(|error| {
+    database::initialize(&state.path).map_err(|error| {
         eprintln!("Database connection failed: {error}");
         "تعذر الاتصال بقاعدة البيانات.".into()
     })
@@ -58,7 +61,7 @@ pub fn configure_backup_directory(
 pub fn create_manual_backup(
     state: State<'_, DatabaseDirectory>,
 ) -> RepositoryResult<backup::BackupResult> {
-    backup::create_manual(&state.0)
+    backup::create_manual(&state.path, &state.backup_lock)
 }
 
 #[tauri::command]
@@ -66,7 +69,7 @@ pub fn restore_database_backup(
     state: State<'_, DatabaseDirectory>,
     path: String,
 ) -> RepositoryResult<backup::RestoreResult> {
-    backup::restore(&state.0, &path)
+    backup::restore(&state.path, &path, &state.backup_lock)
 }
 
 #[tauri::command]

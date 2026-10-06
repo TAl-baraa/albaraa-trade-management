@@ -1,7 +1,10 @@
 mod commands;
 mod database;
 
+use std::{sync::Arc, thread, time::Duration};
 use tauri::Manager;
+
+const AUTOMATIC_BACKUP_CHECK_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -47,7 +50,25 @@ pub fn run() {
         .setup(|app| {
             let directory = app.path().app_data_dir()?;
             database::initialize(&directory)?;
-            app.manage(commands::DatabaseDirectory(directory.clone()));
+            let backup_lock = Arc::new(database::backup::BackupOperationLock::new(()));
+            app.manage(commands::DatabaseDirectory {
+                path: directory.clone(),
+                backup_lock: backup_lock.clone(),
+            });
+            let scheduler_directory = directory.clone();
+            thread::Builder::new()
+                .name("automatic-backup-scheduler".into())
+                .spawn(move || {
+                    loop {
+                        if let Err(error) = database::backup::run_automatic_if_due(
+                            &scheduler_directory,
+                            &backup_lock,
+                        ) {
+                            eprintln!("Automatic backup check failed: {error}");
+                        }
+                        thread::sleep(AUTOMATIC_BACKUP_CHECK_INTERVAL);
+                    }
+                })?;
             #[cfg(debug_assertions)]
             eprintln!(
                 "SQLite initialized: {}",

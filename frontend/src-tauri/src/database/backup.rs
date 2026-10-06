@@ -5,17 +5,29 @@ use serde::Serialize;
 use std::{
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
+    sync::{Mutex, TryLockError},
     time::Duration,
 };
 
 const BACKUP_DIRECTORY_KEY: &str = "backup_directory";
 const LAST_BACKUP_KEY: &str = "last_successful_backup_at";
+const LAST_AUTO_BACKUP_KEY: &str = "last_successful_auto_backup_at";
+const LAST_AUTO_BACKUP_ERROR_KEY: &str = "last_auto_backup_error";
+const AUTO_BACKUP_PREFIX: &str = "albaraa-auto-backup";
+const AUTO_BACKUP_RETENTION: usize = 20;
+const AUTO_BACKUP_INTERVAL_HOURS: i64 = 3;
+
+pub type BackupOperationLock = Mutex<()>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupSettings {
     pub backup_directory: Option<String>,
     pub last_successful_backup_at: Option<String>,
+    pub last_successful_auto_backup_at: Option<String>,
+    pub automatic_backup_available: bool,
+    pub automatic_backup_count: usize,
+    pub automatic_backup_warning: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -29,6 +41,14 @@ pub struct BackupResult {
 #[serde(rename_all = "camelCase")]
 pub struct RestoreResult {
     pub safety_backup_path: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AutomaticBackupOutcome {
+    Created,
+    NotDue,
+    NoDirectory,
+    Busy,
 }
 
 fn setting(connection: &Connection, key: &str) -> RepositoryResult<Option<String>> {
@@ -52,10 +72,36 @@ fn set_setting(connection: &Connection, key: &str, value: &str) -> RepositoryRes
     Ok(())
 }
 
+fn delete_setting(connection: &Connection, key: &str) -> RepositoryResult<()> {
+    connection
+        .execute("DELETE FROM app_metadata WHERE key=?1", [key])
+        .map_err(database_error)?;
+    Ok(())
+}
+
 pub fn settings(connection: &Connection) -> RepositoryResult<BackupSettings> {
+    let backup_directory = setting(connection, BACKUP_DIRECTORY_KEY)?;
+    let directory_status = backup_directory
+        .as_deref()
+        .map(|path| validate_writable_directory(Path::new(path)));
+    let automatic_backup_available = matches!(directory_status, Some(Ok(())));
+    let automatic_backup_warning = match directory_status {
+        Some(Err(error)) => Some(error),
+        _ => setting(connection, LAST_AUTO_BACKUP_ERROR_KEY)?,
+    };
+    let automatic_backup_count = backup_directory
+        .as_deref()
+        .filter(|_| automatic_backup_available)
+        .map(|path| automatic_backup_files(Path::new(path)).map(|files| files.len()))
+        .transpose()?
+        .unwrap_or(0);
     Ok(BackupSettings {
-        backup_directory: setting(connection, BACKUP_DIRECTORY_KEY)?,
+        backup_directory,
         last_successful_backup_at: setting(connection, LAST_BACKUP_KEY)?,
+        last_successful_auto_backup_at: setting(connection, LAST_AUTO_BACKUP_KEY)?,
+        automatic_backup_available,
+        automatic_backup_count,
+        automatic_backup_warning,
     })
 }
 
@@ -87,6 +133,7 @@ pub fn configure_directory(
         BACKUP_DIRECTORY_KEY,
         &canonical.to_string_lossy(),
     )?;
+    delete_setting(connection, LAST_AUTO_BACKUP_ERROR_KEY)?;
     settings(connection)
 }
 
@@ -166,15 +213,15 @@ fn validate_database(connection: &Connection) -> RepositoryResult<()> {
     Ok(())
 }
 
-pub fn create_manual(app_data_directory: &Path) -> RepositoryResult<BackupResult> {
-    let connection = initialize(app_data_directory).map_err(|error| error.to_string())?;
-    let configured = setting(&connection, BACKUP_DIRECTORY_KEY)?
-        .ok_or_else(|| "اختر مجلد النسخ الاحتياطي أولًا.".to_string())?;
-    let directory = PathBuf::from(configured);
-    validate_writable_directory(&directory)?;
-    let timestamp = database_timestamp(&connection)?;
-    let path = available_backup_path(&directory, "albaraa-backup", &timestamp);
-    if let Err(error) = copy_database(&connection, &path) {
+fn create_validated_backup(
+    connection: &Connection,
+    directory: &Path,
+    prefix: &str,
+) -> RepositoryResult<(PathBuf, String)> {
+    validate_writable_directory(directory)?;
+    let timestamp = database_timestamp(connection)?;
+    let path = available_backup_path(directory, prefix, &timestamp);
+    if let Err(error) = copy_database(connection, &path) {
         let _ = fs::remove_file(&path);
         return Err(error);
     }
@@ -182,7 +229,33 @@ pub fn create_manual(app_data_directory: &Path) -> RepositoryResult<BackupResult
         let _ = fs::remove_file(&path);
         return Err(error);
     }
-    let completed_at = iso_timestamp(&connection)?;
+    Ok((path, iso_timestamp(connection)?))
+}
+
+fn acquire_user_operation(
+    operation_lock: &BackupOperationLock,
+) -> RepositoryResult<std::sync::MutexGuard<'_, ()>> {
+    match operation_lock.try_lock() {
+        Ok(guard) => Ok(guard),
+        Err(TryLockError::WouldBlock) => {
+            Err("توجد عملية نسخ احتياطي أو استعادة قيد التنفيذ. أعد المحاولة بعد قليل.".into())
+        }
+        Err(TryLockError::Poisoned(_)) => {
+            Err("تعذر بدء عملية النسخ الاحتياطي بأمان. أعد تشغيل التطبيق.".into())
+        }
+    }
+}
+
+pub fn create_manual(
+    app_data_directory: &Path,
+    operation_lock: &BackupOperationLock,
+) -> RepositoryResult<BackupResult> {
+    let _operation = acquire_user_operation(operation_lock)?;
+    let connection = initialize(app_data_directory).map_err(|error| error.to_string())?;
+    let configured = setting(&connection, BACKUP_DIRECTORY_KEY)?
+        .ok_or_else(|| "اختر مجلد النسخ الاحتياطي أولًا.".to_string())?;
+    let directory = PathBuf::from(configured);
+    let (path, completed_at) = create_validated_backup(&connection, &directory, "albaraa-backup")?;
     set_setting(&connection, LAST_BACKUP_KEY, &completed_at)?;
     Ok(BackupResult {
         path: path.to_string_lossy().into_owned(),
@@ -190,7 +263,138 @@ pub fn create_manual(app_data_directory: &Path) -> RepositoryResult<BackupResult
     })
 }
 
-pub fn restore(app_data_directory: &Path, source_path: &str) -> RepositoryResult<RestoreResult> {
+fn automatic_backup_name(name: &str) -> bool {
+    let Some(stem) = name.strip_prefix("albaraa-auto-backup-") else {
+        return false;
+    };
+    let Some(stem) = stem.strip_suffix(".db") else {
+        return false;
+    };
+    let bytes = stem.as_bytes();
+    if bytes.len() < 17 {
+        return false;
+    }
+    let expected_separators = [(4, b'-'), (7, b'-'), (10, b'-')];
+    if expected_separators
+        .iter()
+        .any(|(index, value)| bytes.get(*index) != Some(value))
+    {
+        return false;
+    }
+    if bytes[..17]
+        .iter()
+        .enumerate()
+        .any(|(index, value)| !matches!(index, 4 | 7 | 10) && !value.is_ascii_digit())
+    {
+        return false;
+    }
+    bytes.len() == 17
+        || (bytes.get(17) == Some(&b'-')
+            && bytes[18..].iter().all(u8::is_ascii_digit)
+            && bytes.len() > 18)
+}
+
+fn automatic_backup_files(directory: &Path) -> RepositoryResult<Vec<PathBuf>> {
+    let entries = fs::read_dir(directory)
+        .map_err(|_| "تعذر قراءة مجلد النسخ الاحتياطي التلقائي.".to_string())?;
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.map_err(|_| "تعذر قراءة أحد ملفات النسخ الاحتياطي التلقائي.".to_string())?;
+        if entry
+            .file_type()
+            .map_err(|_| "تعذر فحص أحد ملفات النسخ الاحتياطي التلقائي.".to_string())?
+            .is_file()
+            && automatic_backup_name(&entry.file_name().to_string_lossy())
+        {
+            files.push(entry.path());
+        }
+    }
+    files.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    Ok(files)
+}
+
+fn apply_automatic_retention(directory: &Path) -> RepositoryResult<()> {
+    let files = automatic_backup_files(directory)?;
+    let remove_count = files.len().saturating_sub(AUTO_BACKUP_RETENTION);
+    for path in files.into_iter().take(remove_count) {
+        fs::remove_file(path)
+            .map_err(|_| "تعذر حذف نسخة تلقائية قديمة وفق سياسة الاحتفاظ.".to_string())?;
+    }
+    Ok(())
+}
+
+fn automatic_backup_due(connection: &Connection) -> RepositoryResult<bool> {
+    let last = setting(connection, LAST_AUTO_BACKUP_KEY)?;
+    match last {
+        None => Ok(true),
+        Some(value) => connection
+            .query_row(
+                "SELECT COALESCE((julianday('now') - julianday(?1)) * 24.0 >= ?2, 1)",
+                params![value, AUTO_BACKUP_INTERVAL_HOURS],
+                |row| row.get(0),
+            )
+            .map_err(database_error),
+    }
+}
+
+fn record_automatic_failure(connection: &Connection, error: &str) {
+    let _ = set_setting(connection, LAST_AUTO_BACKUP_ERROR_KEY, error);
+}
+
+fn finalize_automatic_backup(
+    connection: &Connection,
+    directory: &Path,
+    path: &Path,
+    completed_at: &str,
+) -> RepositoryResult<()> {
+    open_valid_database(path)?;
+    set_setting(connection, LAST_BACKUP_KEY, completed_at)?;
+    set_setting(connection, LAST_AUTO_BACKUP_KEY, completed_at)?;
+    delete_setting(connection, LAST_AUTO_BACKUP_ERROR_KEY)?;
+    apply_automatic_retention(directory)
+}
+
+pub fn run_automatic_if_due(
+    app_data_directory: &Path,
+    operation_lock: &BackupOperationLock,
+) -> RepositoryResult<AutomaticBackupOutcome> {
+    let _operation = match operation_lock.try_lock() {
+        Ok(guard) => guard,
+        Err(TryLockError::WouldBlock) => return Ok(AutomaticBackupOutcome::Busy),
+        Err(TryLockError::Poisoned(_)) => {
+            return Err("تعذر تشغيل النسخ الاحتياطي التلقائي بأمان.".into());
+        }
+    };
+    let connection = initialize(app_data_directory).map_err(|error| error.to_string())?;
+    let Some(configured) = setting(&connection, BACKUP_DIRECTORY_KEY)? else {
+        return Ok(AutomaticBackupOutcome::NoDirectory);
+    };
+    if !automatic_backup_due(&connection)? {
+        return Ok(AutomaticBackupOutcome::NotDue);
+    }
+    let directory = PathBuf::from(configured);
+    let result = create_validated_backup(&connection, &directory, AUTO_BACKUP_PREFIX).and_then(
+        |(path, completed_at)| {
+            finalize_automatic_backup(&connection, &directory, &path, &completed_at)?;
+            Ok(())
+        },
+    );
+    match result {
+        Ok(()) => Ok(AutomaticBackupOutcome::Created),
+        Err(error) => {
+            record_automatic_failure(&connection, &error);
+            Err(error)
+        }
+    }
+}
+
+pub fn restore(
+    app_data_directory: &Path,
+    source_path: &str,
+    operation_lock: &BackupOperationLock,
+) -> RepositoryResult<RestoreResult> {
+    let _operation = acquire_user_operation(operation_lock)?;
     restore_with_recovery_directory(
         app_data_directory,
         Path::new(source_path),
@@ -358,8 +562,9 @@ mod tests {
         .unwrap();
         drop(connection);
 
-        let first = create_manual(&app.0).unwrap();
-        let second = create_manual(&app.0).unwrap();
+        let operation_lock = BackupOperationLock::new(());
+        let first = create_manual(&app.0, &operation_lock).unwrap();
+        let second = create_manual(&app.0, &operation_lock).unwrap();
         assert_ne!(first.path, second.path);
         assert!(
             Path::new(&first.path)
@@ -471,7 +676,8 @@ mod tests {
         )
         .unwrap();
         drop(connection);
-        let backup = create_manual(&app.0).unwrap();
+        let operation_lock = BackupOperationLock::new(());
+        let backup = create_manual(&app.0, &operation_lock).unwrap();
         let mut connection = initialize(&app.0).unwrap();
         auth::change_password(
             &mut connection,
@@ -495,7 +701,7 @@ mod tests {
         .unwrap();
         drop(connection);
 
-        let result = restore(&app.0, &backup.path).unwrap();
+        let result = restore(&app.0, &backup.path, &operation_lock).unwrap();
         assert!(Path::new(&result.safety_backup_path).is_file());
         let restored = initialize(&app.0).unwrap();
         assert!(
@@ -573,12 +779,181 @@ mod tests {
         drop(live);
         let invalid = app.0.join("invalid.db");
         fs::write(&invalid, b"bad").unwrap();
-        assert!(restore(&app.0, invalid.to_str().unwrap()).is_err());
+        assert!(
+            restore(
+                &app.0,
+                invalid.to_str().unwrap(),
+                &BackupOperationLock::new(())
+            )
+            .is_err()
+        );
         assert_eq!(
             customers::list(&initialize(&app.0).unwrap(), None)
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn automatic_backup_due_rules_and_startup_check() {
+        let app = TestDirectory::new("auto-due");
+        let destination = TestDirectory::new("auto-due-destination");
+        let connection = initialize(&app.0).unwrap();
+        configure_directory(&connection, destination.0.to_str().unwrap()).unwrap();
+        assert!(automatic_backup_due(&connection).unwrap());
+        set_setting(
+            &connection,
+            LAST_AUTO_BACKUP_KEY,
+            &connection
+                .query_row(
+                    "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 hours')",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(!automatic_backup_due(&connection).unwrap());
+        set_setting(
+            &connection,
+            LAST_AUTO_BACKUP_KEY,
+            &connection
+                .query_row(
+                    "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-4 hours')",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(automatic_backup_due(&connection).unwrap());
+        drop(connection);
+
+        let lock = BackupOperationLock::new(());
+        assert_eq!(
+            run_automatic_if_due(&app.0, &lock).unwrap(),
+            AutomaticBackupOutcome::Created
+        );
+        assert_eq!(
+            run_automatic_if_due(&app.0, &lock).unwrap(),
+            AutomaticBackupOutcome::NotDue
+        );
+        let connection = initialize(&app.0).unwrap();
+        let auto_timestamp = setting(&connection, LAST_AUTO_BACKUP_KEY).unwrap();
+        assert!(auto_timestamp.is_some());
+        assert_eq!(
+            setting(&connection, LAST_BACKUP_KEY).unwrap(),
+            auto_timestamp
+        );
+        assert_eq!(automatic_backup_files(&destination.0).unwrap().len(), 1);
+        open_valid_database(&automatic_backup_files(&destination.0).unwrap()[0]).unwrap();
+    }
+
+    #[test]
+    fn unavailable_or_invalid_automatic_backup_is_not_successful() {
+        let app = TestDirectory::new("auto-failure");
+        let destination = TestDirectory::new("auto-failure-destination");
+        let connection = initialize(&app.0).unwrap();
+        configure_directory(&connection, destination.0.to_str().unwrap()).unwrap();
+        let corrupt = destination
+            .0
+            .join("albaraa-auto-backup-2000-01-01-000000.db");
+        fs::write(&corrupt, b"invalid").unwrap();
+        assert!(
+            finalize_automatic_backup(
+                &connection,
+                &destination.0,
+                &corrupt,
+                "2026-10-06T00:00:00Z"
+            )
+            .is_err()
+        );
+        assert!(
+            setting(&connection, LAST_AUTO_BACKUP_KEY)
+                .unwrap()
+                .is_none()
+        );
+        drop(connection);
+
+        fs::remove_dir_all(&destination.0).unwrap();
+        let lock = BackupOperationLock::new(());
+        assert!(run_automatic_if_due(&app.0, &lock).is_err());
+        let connection = initialize(&app.0).unwrap();
+        assert!(
+            setting(&connection, LAST_AUTO_BACKUP_KEY)
+                .unwrap()
+                .is_none()
+        );
+        let status = settings(&connection).unwrap();
+        assert!(!status.automatic_backup_available);
+        assert!(status.automatic_backup_warning.is_some());
+    }
+
+    #[test]
+    fn twenty_first_automatic_backup_removes_only_oldest_automatic_file() {
+        let app = TestDirectory::new("retention");
+        let destination = TestDirectory::new("retention-destination");
+        let connection = initialize(&app.0).unwrap();
+        configure_directory(&connection, destination.0.to_str().unwrap()).unwrap();
+        for index in 0..20 {
+            fs::write(
+                destination
+                    .0
+                    .join(format!("albaraa-auto-backup-2000-01-01-00{index:04}.db")),
+                b"old automatic backup",
+            )
+            .unwrap();
+        }
+        let oldest = destination
+            .0
+            .join("albaraa-auto-backup-2000-01-01-000000.db");
+        let manual = destination.0.join("albaraa-backup-2000-01-01-000000.db");
+        let unrelated = destination.0.join("customer-file.db");
+        let safety = destination
+            .0
+            .join("albaraa-before-restore-2000-01-01-000000.db");
+        fs::write(&manual, b"manual").unwrap();
+        fs::write(&unrelated, b"unrelated").unwrap();
+        fs::write(&safety, b"safety").unwrap();
+        drop(connection);
+
+        assert_eq!(
+            run_automatic_if_due(&app.0, &BackupOperationLock::new(())).unwrap(),
+            AutomaticBackupOutcome::Created
+        );
+        assert_eq!(automatic_backup_files(&destination.0).unwrap().len(), 20);
+        assert!(!oldest.exists());
+        assert!(manual.exists());
+        assert!(unrelated.exists());
+        assert!(safety.exists());
+        assert_eq!(
+            settings(&initialize(&app.0).unwrap())
+                .unwrap()
+                .automatic_backup_count,
+            20
+        );
+    }
+
+    #[test]
+    fn shared_lock_prevents_concurrent_backup_and_restore_operations() {
+        let app = TestDirectory::new("concurrency");
+        let destination = TestDirectory::new("concurrency-destination");
+        let connection = initialize(&app.0).unwrap();
+        configure_directory(&connection, destination.0.to_str().unwrap()).unwrap();
+        drop(connection);
+        let lock = BackupOperationLock::new(());
+        let held_by_restore = lock.lock().unwrap();
+        assert_eq!(
+            run_automatic_if_due(&app.0, &lock).unwrap(),
+            AutomaticBackupOutcome::Busy
+        );
+        assert!(create_manual(&app.0, &lock).is_err());
+        assert!(restore(&app.0, "unused.db", &lock).is_err());
+        drop(held_by_restore);
+        assert_eq!(
+            run_automatic_if_due(&app.0, &lock).unwrap(),
+            AutomaticBackupOutcome::Created
         );
     }
 }

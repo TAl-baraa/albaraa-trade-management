@@ -192,7 +192,26 @@ restore aborts. SQLite's online backup API replaces the live contents, the datab
 is reopened and verified, and the React session is cleared so the restored local
 credentials become authoritative. Source and safety files are retained.
 
-Automatic scheduling and retention are intentionally deferred.
+## Automatic backups
+
+A Rust scheduler starts with the application, performs one immediate due check,
+then checks every 10 minutes while the process is running. Timing is based on
+`last_successful_auto_backup_at`: no previous automatic backup is immediately due,
+and subsequent backups become due after three hours. The scheduler does not run
+while the application is closed.
+
+Automatic files use `albaraa-auto-backup-YYYY-MM-DD-HHMMSS.db` and the same SQLite
+online-backup and validation path as manual backups. After a validated automatic
+backup, both `last_successful_auto_backup_at` and `last_successful_backup_at` are
+updated. Only filenames matching the exact automatic naming convention participate
+in retention. The newest 20 are kept; manual, recovery and unrelated files are
+never removed.
+
+Manual backup, automatic backup and restore share one process-wide mutex. An
+automatic check skips silently while another operation holds the mutex. A manual
+backup or restore requested during another backup operation returns a clear Arabic
+busy message. Automatic failures are stored as `last_auto_backup_error` and shown
+non-intrusively on the backup page without blocking application use.
 
 ## Atomic Sales and Receipts
 
