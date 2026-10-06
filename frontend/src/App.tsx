@@ -9,10 +9,11 @@ import { DailySalesPage } from './pages/DailySalesPage'
 import { ProductsPage } from './pages/ProductsPage'
 import { ReceiptRegisterPage } from './pages/ReceiptRegisterPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { BackupSettingsPage } from './pages/BackupSettingsPage'
 import { authRepository, type AuthSession } from './repositories/authRepository'
 import { repositoryError } from './repositories/tauriBridge'
 
-export type AppPage = 'dashboard' | 'customers' | 'products' | 'dailySales' | 'receipts'
+export type AppPage = 'dashboard' | 'customers' | 'products' | 'dailySales' | 'receipts' | 'backup'
 
 function App() {
   const [authMode, setAuthMode] = useState<'checking' | 'setup' | 'login'>('checking')
@@ -31,6 +32,15 @@ function App() {
   }, [])
   useEffect(() => { void loadAuthStatus() }, [loadAuthStatus])
 
+  const endSession = useCallback(() => {
+    setSession(null); setAuthMode('login'); setCurrentPage('dashboard'); setNavigationOpen(false); setChangingPassword(false)
+  }, [])
+
+  const handleRestore = useCallback(() => {
+    setSession(null); setCurrentPage('dashboard'); setNavigationOpen(false); setChangingPassword(false); setPasswordChanged(false)
+    void loadAuthStatus()
+  }, [loadAuthStatus])
+
   if (authMode === 'checking') return <main className="auth-screen"><div className="auth-loading" role="status">جارٍ تهيئة الحساب المحلي...</div></main>
   if (!session) return <AuthScreen mode={authMode} startupError={authError} onAuthenticated={(next) => { setSession(next); setAuthError(null) }} onRetryStatus={() => void loadAuthStatus()} />
 
@@ -43,13 +53,14 @@ function App() {
       onNavigationToggle={() => setNavigationOpen((open) => !open)}
       onNavigationClose={closeNavigation}
       onChangePassword={() => { setPasswordChanged(false); setChangingPassword(true); closeNavigation() }}
-      onLogout={() => { setSession(null); setAuthMode('login'); setCurrentPage('dashboard'); setNavigationOpen(false); setChangingPassword(false) }}
+      onLogout={endSession}
     >
       {currentPage === 'dashboard' && <DashboardPage />}
       {currentPage === 'customers' && <CustomersPage />}
       {currentPage === 'products' && <ProductsPage />}
       {currentPage === 'dailySales' && <DailySalesPage />}
       {currentPage === 'receipts' && <ReceiptRegisterPage />}
+      {currentPage === 'backup' && <BackupSettingsPage onRestored={handleRestore} />}
     </AppShell>
     {changingPassword && <ChangePasswordDialog onClose={() => setChangingPassword(false)} onChanged={() => { setChangingPassword(false); setPasswordChanged(true) }} />}
     {passwordChanged && <div className="toast" role="status"><span>تم تغيير كلمة المرور بنجاح.</span><button className="icon-button" type="button" onClick={() => setPasswordChanged(false)} aria-label="إغلاق"><X size={17} /></button></div>}

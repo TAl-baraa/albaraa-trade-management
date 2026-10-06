@@ -21,7 +21,7 @@ NSIS installer. The included icons are the default Tauri placeholder icons.
 Customers, products, sales and receipts use SQLite through typed Tauri commands exclusively.
 Browser-only development displays an Arabic desktop-app requirement instead of
 falling back to localStorage. Existing browser business data is disposable and is
-not imported. Local single-user authentication is implemented; backups are not.
+not imported. Local single-user authentication and safe manual backup/restore are implemented.
 
 ## SQLite infrastructure (schema version 3)
 
@@ -164,6 +164,35 @@ New dependencies are the official `@tauri-apps/api` for supported IPC, direct
 `unicode-normalization` so the backend can enforce NFKC uniqueness independently
 of the browser. Authentication adds `argon2` and OS-backed `rand_core` randomness
 for standard salted password hashing.
+
+The backup interface uses the official Tauri dialog plugin for native folder and
+file selection, and the opener plugin to open the configured directory in the
+platform file explorer. Neither plugin grants the application cloud-account access.
+
+## Manual backup and restore
+
+The user chooses any writable local directory. Its canonical path is stored as
+`backup_directory` in `app_metadata`; `last_successful_backup_at` is updated only
+after a new backup passes validation. The directory may be changed at any time.
+Google Drive for Desktop, OneDrive, removable drives and ordinary folders are
+treated identically as filesystem locations. The application has no Google API,
+cloud login or synchronization logic.
+
+Manual backups use SQLite's online backup API while the live database is open.
+Files are named `albaraa-backup-YYYY-MM-DD-HHMMSS.db`; a numeric suffix prevents
+overwriting when multiple backups are created in the same second. Before success
+is reported, the result is reopened read-only, checked with `PRAGMA integrity_check`,
+and verified for schema version 3, matching metadata and all expected tables.
+
+Restore accepts a `.db` file from any accessible location. Validation happens
+before the live database is touched. The app then creates and validates a safety
+snapshot in `<app-data>/recovery` named
+`albaraa-before-restore-YYYY-MM-DD-HHMMSS.db`. If that snapshot cannot be created,
+restore aborts. SQLite's online backup API replaces the live contents, the database
+is reopened and verified, and the React session is cleared so the restored local
+credentials become authoritative. Source and safety files are retained.
+
+Automatic scheduling and retention are intentionally deferred.
 
 ## Atomic Sales and Receipts
 

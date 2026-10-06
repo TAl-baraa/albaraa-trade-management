@@ -1,4 +1,4 @@
-use crate::database::{self, auth, customers, products, receipts, records::*, sales};
+use crate::database::{self, auth, backup, customers, products, receipts, records::*, sales};
 use std::path::PathBuf;
 use tauri::State;
 
@@ -37,6 +37,36 @@ pub fn change_password(
     input: auth::ChangePasswordInput,
 ) -> RepositoryResult<()> {
     auth::change_password(&mut connect(&state)?, input)
+}
+
+#[tauri::command]
+pub fn get_backup_settings(
+    state: State<'_, DatabaseDirectory>,
+) -> RepositoryResult<backup::BackupSettings> {
+    backup::settings(&connect(&state)?)
+}
+
+#[tauri::command]
+pub fn configure_backup_directory(
+    state: State<'_, DatabaseDirectory>,
+    directory: String,
+) -> RepositoryResult<backup::BackupSettings> {
+    backup::configure_directory(&connect(&state)?, &directory)
+}
+
+#[tauri::command]
+pub fn create_manual_backup(
+    state: State<'_, DatabaseDirectory>,
+) -> RepositoryResult<backup::BackupResult> {
+    backup::create_manual(&state.0)
+}
+
+#[tauri::command]
+pub fn restore_database_backup(
+    state: State<'_, DatabaseDirectory>,
+    path: String,
+) -> RepositoryResult<backup::RestoreResult> {
+    backup::restore(&state.0, &path)
 }
 
 #[tauri::command]

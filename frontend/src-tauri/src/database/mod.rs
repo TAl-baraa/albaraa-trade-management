@@ -1,5 +1,6 @@
 use rusqlite::{Connection, TransactionBehavior};
 pub mod auth;
+pub mod backup;
 pub mod customers;
 pub mod products;
 pub mod receipts;
@@ -9,9 +10,10 @@ mod repository_tests;
 pub mod sales;
 use std::{error::Error, fs, io, path::Path, time::Duration};
 
-const SCHEMA_VERSION: i64 = 3;
+pub(crate) const DATABASE_FILE_NAME: &str = "albaraa.db";
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 const SCHEMA: &str = include_str!("schema.sql");
-const TABLES: [&str; 7] = [
+pub(crate) const TABLES: [&str; 7] = [
     "app_metadata",
     "local_user",
     "customers",
@@ -24,7 +26,7 @@ const TABLES: [&str; 7] = [
 /// Every future repository connection must use this function to enable foreign keys.
 pub fn initialize(app_data_dir: &Path) -> Result<Connection, Box<dyn Error>> {
     fs::create_dir_all(app_data_dir)?;
-    let mut connection = Connection::open(app_data_dir.join("albaraa.db"))?;
+    let mut connection = Connection::open(app_data_dir.join(DATABASE_FILE_NAME))?;
     connection.busy_timeout(Duration::from_secs(5))?;
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.pragma_update(None, "synchronous", "FULL")?;
