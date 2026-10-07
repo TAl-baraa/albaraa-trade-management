@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Al-Baraa Trade Management",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.albaraa.trademanagement",
   "build": {
     "frontendDist": "../dist",
@@ -30,10 +30,18 @@
     "active": true,
     "targets": ["nsis"],
     "icon": [
+      "icons/icon.png",
       "icons/32x32.png",
+      "icons/64x64.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
+    }
   }
 }

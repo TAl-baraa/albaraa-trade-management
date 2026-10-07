@@ -16,7 +16,20 @@ Tools, Windows SDK, and WebView2. The first launch downloads and compiles Rust
 dependencies.
 
 `npm run tauri -- build` runs `npm run build`, embeds `../dist`, and builds an
-NSIS installer. The included icons are the default Tauri placeholder icons.
+NSIS installer. Windows executable and installer icons use the approved Al-Baraa
+navy-and-gold symbol; the full approved logo remains in the repository as the
+branding source.
+
+Maintenance note: Windows may continue showing a previously cached Tauri icon
+for an existing desktop shortcut after reinstalling version 1.0.0. The executable,
+installer, application window and taskbar resources use the Al-Baraa icon. Review
+desktop-shortcut cache handling in a future maintenance release.
+
+The first production version is `1.0.0`. The Windows product name is
+`Al-Baraa Trade Management`, and the stable application identifier is
+`com.albaraa.trademanagement`. The installer contains application binaries and
+static resources only; it never contains `albaraa.db`, backups, credentials, or
+temporary statement PDFs.
 
 Customers, products, sales, receipts and transfers use SQLite through typed Tauri commands exclusively.
 Browser-only development displays an Arabic desktop-app requirement instead of
@@ -37,14 +50,14 @@ The complete executable schema, including constraints and indexes, lives in
 [`src/database/schema.sql`](src/database/schema.sql).
 
 Version 2 removed the product purchase fields. Version 3 adds the singleton local
-authentication table. Existing version 2 databases migrate to version 3 in one
-transaction without changing business data. Version 1 contains disposable test
-data and is not migrated. The application rejects unsupported versions rather
-than resetting data automatically.
+authentication table, and version 4 adds transfers. Existing version 2 and 3
+databases migrate forward without changing existing business data. Version 1
+contains disposable test data and is not migrated. The application rejects
+unsupported versions rather than resetting data automatically.
 
 | Table | Purpose and key fields |
 | --- | --- |
-| `app_metadata` | String key/value settings, `updated_at`; initial `schema_version = 3` only |
+| `app_metadata` | String key/value settings, `updated_at`; initial `schema_version = 4` only |
 | `local_user` | Singleton ID, fixed username, Argon2id password hash, creation/update timestamps |
 | `customers` | ID, name, phone, notes, separate signed IQD/USD balances, last purchase/payment business dates, history flag, archive state/time, creation/update timestamps |
 | `products` | ID, name, unique normalized name, notes, archive state, creation/update timestamps |
@@ -86,9 +99,22 @@ Every connection enables foreign keys, a five-second busy timeout and FULL
 synchronous durability. SQLite's default rollback journal is used. Schema
 creation and both version markers (`user_version` and `app_metadata`) are one
 immediate transaction. Subsequent launches verify the version markers and query
-all seven tables without reseeding or clearing data. Unknown versions, unversioned
+all eight tables without reseeding or clearing data. Unknown versions, unversioned
 nonempty databases, inconsistent metadata and SQL/I/O errors stop startup rather
 than silently replacing data. Failed schema creation rolls back.
+
+Before any supported migration changes an existing database, startup creates a
+validated SQLite backup in `app_data_dir/recovery` named
+`albaraa-before-migration-YYYY-MM-DD-HHMMSS.db`. The backup must pass
+`integrity_check`, and its SQLite and metadata versions must match the source.
+Startup aborts before opening the migration transaction if creation or validation
+fails. Fresh database creation does not create a recovery backup.
+
+Installing a newer NSIS package updates application files without replacing the
+database under `%APPDATA%/com.albaraa.trademanagement`. Startup detects its schema
+version and runs supported forward migrations. No installer or uninstall hook
+deletes AppData, so uninstalling the application leaves the database for recovery
+or a later reinstall; removing it is an explicit user/administrator action.
 
 Only schema metadata is seeded. All five business/history tables start empty.
 Customer mock data is not imported by the runtime, and obsolete product mocks were

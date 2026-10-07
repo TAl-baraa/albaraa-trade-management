@@ -56,6 +56,9 @@ pub fn run() {
             statement_pdf::share_statement_pdf
         ])
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_icon(tauri::image::Image::from_app_icon_resource(256)?)?;
+            }
             let directory = app.path().app_data_dir()?;
             database::initialize(&directory)?;
             let backup_lock = Arc::new(database::backup::BackupOperationLock::new(()));

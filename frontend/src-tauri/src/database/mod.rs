@@ -1,4 +1,4 @@
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, backup::Backup};
 pub mod auth;
 pub mod backup;
 pub mod customers;
@@ -9,7 +9,12 @@ pub mod records;
 mod repository_tests;
 pub mod sales;
 pub mod transfers;
-use std::{error::Error, fs, io, path::Path, time::Duration};
+use std::{
+    error::Error,
+    fs, io,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 pub(crate) const DATABASE_FILE_NAME: &str = "albaraa.db";
 pub(crate) const SCHEMA_VERSION: i64 = 4;
@@ -33,9 +38,13 @@ pub fn initialize(app_data_dir: &Path) -> Result<Connection, Box<dyn Error>> {
     connection.pragma_update(None, "foreign_keys", true)?;
     connection.pragma_update(None, "synchronous", "FULL")?;
 
+    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if matches!(version, 2 | 3) {
+        create_pre_migration_backup(&connection, app_data_dir, version)?;
+    }
+
     // The schema and both version markers commit together, including on first launch.
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     match version {
         0 => {
             let existing_tables: i64 = transaction.query_row(
@@ -78,6 +87,66 @@ pub fn initialize(app_data_dir: &Path) -> Result<Connection, Box<dyn Error>> {
     }
     transaction.commit()?;
     Ok(connection)
+}
+
+fn create_pre_migration_backup(
+    connection: &Connection,
+    app_data_dir: &Path,
+    source_version: i64,
+) -> Result<PathBuf, Box<dyn Error>> {
+    let recovery_directory = app_data_dir.join("recovery");
+    fs::create_dir_all(&recovery_directory)?;
+    let timestamp: String = connection.query_row(
+        "SELECT strftime('%Y-%m-%d-%H%M%S', 'now', 'localtime')",
+        [],
+        |row| row.get(0),
+    )?;
+    let mut backup_path =
+        recovery_directory.join(format!("albaraa-before-migration-{timestamp}.db"));
+    for suffix in 2.. {
+        if !backup_path.exists() {
+            break;
+        }
+        backup_path =
+            recovery_directory.join(format!("albaraa-before-migration-{timestamp}-{suffix}.db"));
+    }
+
+    let backup_result = (|| -> Result<(), Box<dyn Error>> {
+        let mut destination = Connection::open(&backup_path)?;
+        Backup::new(connection, &mut destination)?.run_to_completion(
+            32,
+            Duration::from_millis(20),
+            None,
+        )?;
+        drop(destination);
+
+        let validation =
+            Connection::open_with_flags(&backup_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let integrity: String =
+            validation.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+        if integrity != "ok" {
+            return Err(io::Error::other("فشل التحقق من سلامة نسخة ما قبل الترحيل").into());
+        }
+        let backup_version: i64 =
+            validation.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let metadata_version: String = validation.query_row(
+            "SELECT value FROM app_metadata WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )?;
+        if backup_version != source_version || metadata_version != source_version.to_string() {
+            return Err(
+                io::Error::other("نسخة ما قبل الترحيل لا تطابق إصدار قاعدة البيانات").into(),
+            );
+        }
+        Ok(())
+    })();
+
+    if let Err(error) = backup_result {
+        let _ = fs::remove_file(&backup_path);
+        return Err(error);
+    }
+    Ok(backup_path)
 }
 
 fn migrate_v3_to_v4(transaction: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
@@ -185,6 +254,49 @@ mod tests {
         drop(connection);
         fs::remove_file(directory.join("albaraa.db")).unwrap();
         fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn migration_aborts_when_recovery_backup_cannot_be_created() {
+        let directory = std::env::temp_dir().join(format!(
+            "albaraa-migration-failure-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let connection = initialize(&directory).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE operation_history_v3 (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    sale_id TEXT REFERENCES sales(id) ON DELETE RESTRICT,
+                    receipt_id TEXT REFERENCES receipts(id) ON DELETE RESTRICT,
+                    operation_type TEXT NOT NULL CHECK (operation_type IN ('created', 'updated', 'deleted')),
+                    actor TEXT NOT NULL CHECK (length(trim(actor)) > 0),
+                    changed_at TEXT NOT NULL,
+                    changes_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(changes_json) AND json_type(changes_json) = 'array'),
+                    CHECK ((sale_id IS NOT NULL) + (receipt_id IS NOT NULL) = 1)
+                ) STRICT;
+                DROP TABLE operation_history;
+                ALTER TABLE operation_history_v3 RENAME TO operation_history;
+                DROP TABLE transfers;
+                UPDATE app_metadata SET value = '3' WHERE key = 'schema_version';
+                PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        drop(connection);
+        fs::write(directory.join("recovery"), b"not a directory").unwrap();
+
+        assert!(initialize(&directory).is_err());
+        let connection = Connection::open(directory.join(DATABASE_FILE_NAME)).unwrap();
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 3);
+        drop(connection);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

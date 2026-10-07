@@ -23,8 +23,7 @@ impl TestDirectory {
 }
 impl Drop for TestDirectory {
     fn drop(&mut self) {
-        fs::remove_file(self.0.join("albaraa.db")).unwrap();
-        fs::remove_dir(&self.0).unwrap();
+        fs::remove_dir_all(&self.0).unwrap();
     }
 }
 fn customer_input() -> CustomerInput {
@@ -872,4 +871,33 @@ fn schema_three_migrates_to_transfers_without_losing_data() {
         2
     );
     assert!(auth::login(&connection, login_input("admin", "password-1")).is_ok());
+    let recovery_directory = directory.0.join("recovery");
+    let backups: Vec<PathBuf> = fs::read_dir(&recovery_directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(backups.len(), 1);
+    assert!(
+        backups[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("albaraa-before-migration-")
+    );
+    let backup = rusqlite::Connection::open(&backups[0]).unwrap();
+    let backup_integrity: String = backup
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    let backup_version: i64 = backup
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(backup_integrity, "ok");
+    assert_eq!(backup_version, 3);
+    assert_eq!(
+        backup
+            .query_row("SELECT count(*) FROM customers", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }
