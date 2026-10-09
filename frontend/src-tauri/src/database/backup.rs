@@ -523,8 +523,6 @@ mod tests {
                 name: "Customer".into(),
                 phone: String::new(),
                 notes: String::new(),
-                iqd_balance: 0.0,
-                usd_balance: 0.0,
             },
         )
         .unwrap();
@@ -651,8 +649,6 @@ mod tests {
                 name: "Original customer".into(),
                 phone: String::new(),
                 notes: String::new(),
-                iqd_balance: 0.0,
-                usd_balance: 0.0,
             },
         )
         .unwrap();
@@ -721,8 +717,6 @@ mod tests {
                 name: "Later customer".into(),
                 phone: String::new(),
                 notes: String::new(),
-                iqd_balance: 0.0,
-                usd_balance: 0.0,
             },
         )
         .unwrap();
@@ -786,8 +780,6 @@ mod tests {
                 name: "Keep me".into(),
                 phone: String::new(),
                 notes: String::new(),
-                iqd_balance: 0.0,
-                usd_balance: 0.0,
             },
         )
         .unwrap();

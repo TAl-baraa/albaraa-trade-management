@@ -1,8 +1,27 @@
 use super::records::*;
 use rusqlite::{Connection, OptionalExtension, params};
 
+const SELECT_WITH_LAST_TRANSACTION_DATES: &str = "SELECT
+    customers.id,
+    customers.name,
+    customers.phone,
+    customers.notes,
+    customers.iqd_balance_minor,
+    customers.usd_balance_minor,
+    (SELECT MAX(sales.sale_date) FROM sales WHERE sales.customer_id = customers.id AND sales.is_deleted = 0) AS last_purchase_date,
+    (SELECT MAX(receipts.business_date) FROM receipts WHERE receipts.customer_id = customers.id AND receipts.is_deleted = 0) AS last_payment_date,
+    customers.has_transaction_history,
+    customers.is_archived,
+    customers.created_at,
+    customers.updated_at,
+    customers.archived_at
+FROM customers";
+
 pub fn list(connection: &Connection, archived: Option<bool>) -> RepositoryResult<Vec<Customer>> {
-    let mut statement = connection.prepare("SELECT * FROM customers WHERE (?1 IS NULL OR is_archived = ?1) ORDER BY created_at DESC, rowid DESC").map_err(database_error)?;
+    let sql = format!(
+        "{SELECT_WITH_LAST_TRANSACTION_DATES} WHERE (?1 IS NULL OR customers.is_archived = ?1) ORDER BY customers.created_at DESC, customers.rowid DESC"
+    );
+    let mut statement = connection.prepare(&sql).map_err(database_error)?;
     statement
         .query_map([archived], Customer::from_row)
         .map_err(database_error)?
@@ -11,12 +30,9 @@ pub fn list(connection: &Connection, archived: Option<bool>) -> RepositoryResult
 }
 
 pub fn get(connection: &Connection, id: &str) -> RepositoryResult<Option<Customer>> {
+    let sql = format!("{SELECT_WITH_LAST_TRANSACTION_DATES} WHERE customers.id = ?1");
     connection
-        .query_row(
-            "SELECT * FROM customers WHERE id = ?1",
-            [id],
-            Customer::from_row,
-        )
+        .query_row(&sql, [id], Customer::from_row)
         .optional()
         .map_err(database_error)
 }
@@ -29,16 +45,14 @@ pub fn save(
     if input.name.trim().is_empty() {
         return Err("اسم الزبون مطلوب.".into());
     }
-    let iqd = money_minor(input.iqd_balance)?;
-    let usd = money_minor(input.usd_balance)?;
     let record_id = match id {
         Some(value) => value.to_owned(),
         None => new_id(connection, "customer")?,
     };
     let count = if id.is_some() {
-        connection.execute(&format!("UPDATE customers SET name=?2, phone=?3, notes=?4, iqd_balance_minor=?5, usd_balance_minor=?6, updated_at={NOW} WHERE id=?1"), params![record_id, input.name.trim(), input.phone.trim(), input.notes.trim(), iqd, usd])
+        connection.execute(&format!("UPDATE customers SET name=?2, phone=?3, notes=?4, updated_at={NOW} WHERE id=?1"), params![record_id, input.name.trim(), input.phone.trim(), input.notes.trim()])
     } else {
-        connection.execute(&format!("INSERT INTO customers(id, name, phone, notes, iqd_balance_minor, usd_balance_minor, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, {NOW}, {NOW})"), params![record_id, input.name.trim(), input.phone.trim(), input.notes.trim(), iqd, usd])
+        connection.execute(&format!("INSERT INTO customers(id, name, phone, notes, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, {NOW}, {NOW})"), params![record_id, input.name.trim(), input.phone.trim(), input.notes.trim()])
     }.map_err(database_error)?;
     require_changed(count)?;
     get(connection, &record_id)?.ok_or_else(|| "الزبون غير موجود.".into())

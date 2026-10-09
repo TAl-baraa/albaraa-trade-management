@@ -1,4 +1,4 @@
-import { ArrowLeftRight, BookOpenText, Building2, DatabaseBackup, KeyRound, LayoutDashboard, LogOut, Menu, Package, ReceiptText, UserRound, Users, X } from 'lucide-react'
+import { ArrowLeftRight, BookOpenText, Building2, DatabaseBackup, KeyRound, LayoutDashboard, LogOut, Menu, Package, ReceiptText, UserRound, Users } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import type { AppPage } from '../../App'
 
@@ -49,7 +49,6 @@ export function AppShell({ children, currentPage, username, isNavigationOpen, on
       </header>
       {isNavigationOpen && <button className="drawer-backdrop" type="button" aria-label="إغلاق قائمة التنقل" onClick={onNavigationClose} />}
       <aside className={`sidebar ${isNavigationOpen ? 'sidebar--open' : ''}`} aria-label="التنقل الرئيسي">
-        <button className="sidebar-close icon-button icon-button--light" type="button" onClick={onNavigationClose} aria-label="إغلاق قائمة التنقل"><X size={22} /></button>
         <div className="sidebar-brand">
           <div className="sidebar-brand__icon"><Building2 size={28} /></div>
           <div><strong>مكتب البراء لتجارة المواد الإنشائية</strong><span>نظام إدارة التجارة</span></div>

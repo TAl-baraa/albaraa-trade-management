@@ -1,7 +1,7 @@
 import type { Customer } from '../types/customer'
 import { databaseCommand } from './tauriBridge'
 
-export type CustomerInput = Pick<Customer, 'name' | 'phone' | 'notes' | 'iqdBalance' | 'usdBalance'>
+export type CustomerInput = Pick<Customer, 'name' | 'phone' | 'notes'>
 
 export const customerRepository = {
   getAll: (): Promise<Customer[]> => databaseCommand('list_customers', { archived: null }),

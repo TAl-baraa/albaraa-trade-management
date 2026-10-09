@@ -8,15 +8,16 @@ import { formatNumber } from '../../utils/formatters'
 import { calculateSaleTotal, isPositiveDecimal } from '../../utils/money'
 import { PredictiveSelector } from './PredictiveSelector'
 import { MoneyInput } from '../common/MoneyInput'
+import { DriverNameAutocomplete } from './DriverNameAutocomplete'
 
 type FieldName = keyof SaleFormValues | 'totalAmount'
 type FormErrors = Partial<Record<FieldName, string>>
-interface SaleRowEditorProps { customers: Customer[]; products: Product[]; selectedDate: string; sale?: Sale; variant: 'table' | 'card'; onSave: (values: SaleFormValues) => Promise<boolean>; onCancel?: () => void }
+interface SaleRowEditorProps { customers: Customer[]; products: Product[]; driverNames: string[]; selectedDate: string; sale?: Sale; variant: 'table' | 'card'; onSave: (values: SaleFormValues) => Promise<boolean>; onCancel?: () => void }
 
 const emptyValues = (saleDate: string): SaleFormValues => ({ customerId: '', productId: '', weightTons: '', driverName: '', unitSalePrice: '', saleCurrency: 'IQD', saleDate })
 const valuesFromSale = (sale: Sale): SaleFormValues => ({ customerId: sale.customerId, productId: sale.productId, weightTons: String(sale.weightTons), driverName: sale.driverName, unitSalePrice: String(sale.unitSalePrice), saleCurrency: sale.saleCurrency, saleDate: sale.saleDate })
 
-export function SaleRowEditor({ customers, products, selectedDate, sale, variant, onSave, onCancel }: SaleRowEditorProps) {
+export function SaleRowEditor({ customers, products, driverNames, selectedDate, sale, variant, onSave, onCancel }: SaleRowEditorProps) {
   const weightRef = useRef<HTMLInputElement>(null)
   const [values, setValues] = useState<SaleFormValues>(() => sale ? valuesFromSale(sale) : emptyValues(selectedDate))
   const [errors, setErrors] = useState<FormErrors>({})
@@ -50,7 +51,7 @@ export function SaleRowEditor({ customers, products, selectedDate, sale, variant
   const controls = {
     weight: input('weightTons', 'الوزن بالطن', true),
     product: <PredictiveSelector compact label="المنتج" placeholder="ابحث عن منتج" options={activeProducts} value={values.productId} error={errors.productId} onChange={(id) => update('productId', id)} />,
-    driver: input('driverName', 'اسم السائق'),
+    driver: <DriverNameAutocomplete value={values.driverName} suggestions={driverNames} error={errors.driverName} onChange={(name) => update('driverName', name)} />,
     customer: <PredictiveSelector compact label="اسم المشتري" placeholder="ابحث عن مشتري" options={activeCustomers} value={values.customerId} error={errors.customerId} onChange={(id) => update('customerId', id)} />,
     price: <div><MoneyInput value={values.unitSalePrice} label="سعر بيع الطن" placeholder="سعر بيع الطن" invalid={Boolean(errors.unitSalePrice)} onChange={(value) => update('unitSalePrice', value)} />{errors.unitSalePrice && <small className="field-error">{errors.unitSalePrice}</small>}</div>,
     currency: <label className="inline-field"><span className="visually-hidden">العملة</span><select aria-label="العملة" value={values.saleCurrency} onChange={(event) => update('saleCurrency', event.target.value as SaleFormValues['saleCurrency'])}><option value="IQD">IQD</option><option value="USD">USD</option></select></label>,

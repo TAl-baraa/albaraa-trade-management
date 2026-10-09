@@ -38,8 +38,6 @@ pub struct CustomerInput {
     pub name: String,
     pub phone: String,
     pub notes: String,
-    pub iqd_balance: f64,
-    pub usd_balance: f64,
 }
 
 #[derive(Debug, Serialize, Clone)]

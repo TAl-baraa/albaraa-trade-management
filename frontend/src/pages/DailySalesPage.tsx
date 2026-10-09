@@ -15,6 +15,7 @@ import { salesAccountingService } from '../services/salesAccountingService'
 import type { Sale, SaleFormValues } from '../types/sale'
 import { getLocalDateString, shiftLocalDate } from '../utils/date'
 import { formatDate, formatNumber } from '../utils/formatters'
+import { buildDriverNameSuggestions } from '../utils/driverNames'
 
 export function DailySalesPage() {
   const today = getLocalDateString()
@@ -27,6 +28,7 @@ export function DailySalesPage() {
   const [showDeleted, setShowDeleted] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const dailySales = useMemo(() => sales.filter((sale) => !sale.isDeleted && sale.saleDate === selectedDate).sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [sales, selectedDate])
+  const driverNames = useMemo(() => buildDriverNameSuggestions(sales.map((sale) => sale.driverName)), [sales])
   const createSale = async (values: SaleFormValues): Promise<boolean> => {
     const result = await salesAccountingService.create(values)
     if (!result.ok) { setToast(result.message); return false }
@@ -54,7 +56,7 @@ export function DailySalesPage() {
       <header className="page-header"><div><span className="eyebrow">قسم المبيعات</span><h1>السجل اليومي للمبيعات</h1><p>تسجيل كل عملية بيع مستقلة ومتابعتها حسب تاريخ العمل.</p></div><button className="button button--secondary" type="button" onClick={() => setShowDeleted(true)}><Archive size={18} />المحذوفات</button></header>
       <DailyDateNavigation selectedDate={selectedDate} today={today} onChange={changeDate} onPrevious={() => changeDate(shiftLocalDate(selectedDate, -1))} onNext={() => changeDate(shiftLocalDate(selectedDate, 1))} />
       <div className="register-heading"><div><h2>مبيعات يوم {formatDate(selectedDate)}</h2><span>{formatNumber(dailySales.length)} عملية بيع</span></div></div>
-      <RepositoryStatus loading={loading || productsLoading || salesLoading} error={error || productsError || salesError} onRetry={() => { void reload(); void reloadProducts(); void reloadSales() }} /><SalesRegister sales={dailySales} customers={customers} products={products} selectedDate={selectedDate} onCreate={createSale} onUpdate={updateSale} onDelete={setDeletingSale} onHistory={setHistorySale} onReview={toggleReview} />
+      <RepositoryStatus loading={loading || productsLoading || salesLoading} error={error || productsError || salesError} onRetry={() => { void reload(); void reloadProducts(); void reloadSales() }} /><SalesRegister sales={dailySales} customers={customers} products={products} driverNames={driverNames} selectedDate={selectedDate} onCreate={createSale} onUpdate={updateSale} onDelete={setDeletingSale} onHistory={setHistorySale} onReview={toggleReview} />
       {deletingSale && <DeleteOperationDialog title="تأكيد حذف البيع" description={`سيُحذف بيع ${deletingSale.productNameSnapshot} للمشتري ${deletingSale.customerNameSnapshot} بوزن ${formatNumber(deletingSale.weightTons)} طن وإجمالي ${formatNumber(deletingSale.totalAmount)} ${deletingSale.saleCurrency} بتاريخ ${formatDate(deletingSale.saleDate)}، وسيُعكس أثره من حساب الزبون.`} onConfirm={confirmDelete} onClose={() => setDeletingSale(null)} />}
       {historySale && <OperationHistoryDialog title="سجل تغييرات البيع" history={historySale.history} onClose={() => setHistorySale(null)} />}
       {showDeleted && <DeletedRecordsDialog title="المبيعات المحذوفة" records={sales.filter((sale) => sale.isDeleted).map((record) => ({ kind: 'sale', record }))} onHistory={(record) => { setShowDeleted(false); setHistorySale(record as Sale) }} onClose={() => setShowDeleted(false)} />}

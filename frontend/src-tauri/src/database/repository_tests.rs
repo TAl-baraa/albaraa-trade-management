@@ -31,9 +31,16 @@ fn customer_input() -> CustomerInput {
         name: "زبون اختبار".into(),
         phone: "07700000000".into(),
         notes: "ملاحظة".into(),
-        iqd_balance: 0.0,
-        usd_balance: 0.0,
     }
+}
+
+fn set_balances(connection: &rusqlite::Connection, customer_id: &str, iqd: i64, usd: i64) {
+    connection
+        .execute(
+            "UPDATE customers SET iqd_balance_minor=?2, usd_balance_minor=?3 WHERE id=?1",
+            rusqlite::params![customer_id, iqd, usd],
+        )
+        .unwrap();
 }
 fn product_input(name: &str) -> ProductInput {
     ProductInput {
@@ -245,11 +252,17 @@ fn customer_lifecycle_and_restart() {
     let connection = initialize(&directory.0).unwrap();
     assert!(customers::list(&connection, None).unwrap().is_empty());
     assert!(customers::get(&connection, "missing").unwrap().is_none());
-    let created = customers::save(&connection, None, customer_input()).unwrap();
+    let command_input: CustomerInput = serde_json::from_value(serde_json::json!({
+        "name": "زبون اختبار",
+        "phone": "07700000000",
+        "notes": "ملاحظة"
+    }))
+    .unwrap();
+    let created = customers::save(&connection, None, command_input).unwrap();
+    assert_eq!((created.iqd_balance, created.usd_balance), (0.0, 0.0));
+    set_balances(&connection, &created.id, 150_025, -2_075);
     let mut input = customer_input();
     input.name = "زبون معدل".into();
-    input.iqd_balance = 1500.25;
-    input.usd_balance = -20.75;
     let updated = customers::save(&connection, Some(&created.id), input.clone()).unwrap();
     assert_eq!(updated.created_at, created.created_at);
     assert_eq!(
@@ -258,8 +271,7 @@ fn customer_lifecycle_and_restart() {
     );
     assert!(customers::set_archived(&connection, &created.id, true).is_err());
     assert!(customers::delete(&connection, &created.id).is_err());
-    input.iqd_balance = 0.0;
-    input.usd_balance = 0.0;
+    set_balances(&connection, &created.id, 0, 0);
     customers::save(&connection, Some(&created.id), input).unwrap();
     assert!(
         customers::set_archived(&connection, &created.id, true)
@@ -346,12 +358,89 @@ fn product_lifecycle_normalized_uniqueness_and_restart() {
 fn invalid_customer_and_product_values_are_rejected() {
     let directory = TestDirectory::new();
     let connection = initialize(&directory.0).unwrap();
-    for invalid in [f64::NAN, f64::INFINITY, 1e20] {
-        let mut input = customer_input();
-        input.iqd_balance = invalid;
-        assert!(customers::save(&connection, None, input).is_err());
-    }
+    let mut invalid_customer = customer_input();
+    invalid_customer.name = "   ".into();
+    assert!(customers::save(&connection, None, invalid_customer).is_err());
     assert!(products::save(&connection, None, product_input("  ")).is_err());
+}
+
+#[test]
+fn customer_last_transaction_dates_follow_active_sales_and_receipts() {
+    let directory = TestDirectory::new();
+    let mut connection = initialize(&directory.0).unwrap();
+    let first_customer = customers::save(&connection, None, customer_input()).unwrap();
+    let mut second_input = customer_input();
+    second_input.name = "زبون ثانٍ".into();
+    let second_customer = customers::save(&connection, None, second_input).unwrap();
+    let product = products::save(&connection, None, product_input("منتج التواريخ")).unwrap();
+
+    let empty = customers::get(&connection, &first_customer.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(empty.last_purchase_date, None);
+    assert_eq!(empty.last_payment_date, None);
+
+    let older_sale = sales::create(
+        &mut connection,
+        sale_input(&first_customer.id, &product.id, "1", "10", "IQD"),
+    )
+    .unwrap()
+    .sale
+    .unwrap();
+    let mut newer_sale_input = sale_input(&first_customer.id, &product.id, "1", "20", "IQD");
+    newer_sale_input.sale_date = "2026-10-08".into();
+    let newer_sale = sales::create(&mut connection, newer_sale_input)
+        .unwrap()
+        .sale
+        .unwrap();
+
+    let older_receipt = receipts::create(
+        &mut connection,
+        receipt_input(&first_customer.id, "5", "IQD"),
+    )
+    .unwrap()
+    .receipt
+    .unwrap();
+    let mut newer_receipt_input = receipt_input(&first_customer.id, "5", "IQD");
+    newer_receipt_input.business_date = "2026-10-09".into();
+    let newer_receipt = receipts::create(&mut connection, newer_receipt_input)
+        .unwrap()
+        .receipt
+        .unwrap();
+
+    let listed = customers::list(&connection, None).unwrap();
+    let first = listed
+        .iter()
+        .find(|customer| customer.id == first_customer.id)
+        .unwrap();
+    assert_eq!(first.last_purchase_date.as_deref(), Some("2026-10-08"));
+    assert_eq!(first.last_payment_date.as_deref(), Some("2026-10-09"));
+
+    let mut edited_sale = sale_input(&first_customer.id, &product.id, "1", "20", "IQD");
+    edited_sale.sale_date = "2026-10-04".into();
+    sales::update(&mut connection, &newer_sale.id, edited_sale).unwrap();
+    let mut reassigned_receipt = receipt_input(&second_customer.id, "5", "IQD");
+    reassigned_receipt.business_date = "2026-10-09".into();
+    receipts::update(&mut connection, &newer_receipt.id, reassigned_receipt).unwrap();
+
+    let first = customers::get(&connection, &first_customer.id)
+        .unwrap()
+        .unwrap();
+    let second = customers::get(&connection, &second_customer.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.last_purchase_date.as_deref(), Some("2026-10-05"));
+    assert_eq!(first.last_payment_date.as_deref(), Some("2026-10-05"));
+    assert_eq!(second.last_purchase_date, None);
+    assert_eq!(second.last_payment_date.as_deref(), Some("2026-10-09"));
+
+    sales::soft_delete(&mut connection, &older_sale.id, "اختبار التاريخ").unwrap();
+    receipts::soft_delete(&mut connection, &older_receipt.id, "اختبار التاريخ").unwrap();
+    let first = customers::get(&connection, &first_customer.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.last_purchase_date.as_deref(), Some("2026-10-04"));
+    assert_eq!(first.last_payment_date, None);
 }
 
 #[test]
@@ -422,7 +511,6 @@ fn sales_atomic_lifecycle_snapshots_and_restart() {
 
     let mut renamed_customer = customer_input();
     renamed_customer.name = "اسم زبون جديد".into();
-    renamed_customer.usd_balance = 300.0;
     customers::save(&connection, Some(&second_customer.id), renamed_customer).unwrap();
     products::save(
         &connection,
@@ -549,10 +637,9 @@ fn receipts_atomic_lifecycle_overpayment_snapshots_and_restart() {
     let mut connection = initialize(&directory.0).unwrap();
     assert!(receipts::list(&connection, None).unwrap().is_empty());
 
-    let mut first_input = customer_input();
-    first_input.iqd_balance = 100.0;
-    first_input.usd_balance = 50.0;
+    let first_input = customer_input();
     let first_customer = customers::save(&connection, None, first_input).unwrap();
+    set_balances(&connection, &first_customer.id, 10_000, 5_000);
     let mut second_input = customer_input();
     second_input.name = "زبون الواصل الثاني".into();
     let second_customer = customers::save(&connection, None, second_input).unwrap();
@@ -612,7 +699,6 @@ fn receipts_atomic_lifecycle_overpayment_snapshots_and_restart() {
 
     let mut renamed = customer_input();
     renamed.name = "اسم زبون واصل جديد".into();
-    renamed.usd_balance = -150.0;
     customers::save(&connection, Some(&second_customer.id), renamed).unwrap();
     let mut unrelated = receipt_input(&second_customer.id, "150", "USD");
     unrelated.business_date = "2026-10-06".into();
@@ -642,8 +728,8 @@ fn receipts_atomic_lifecycle_overpayment_snapshots_and_restart() {
 
     let mut archived_input = customer_input();
     archived_input.name = "زبون مؤرشف".into();
-    archived_input.iqd_balance = 100.0;
     let archived_customer = customers::save(&connection, None, archived_input).unwrap();
+    set_balances(&connection, &archived_customer.id, 10_000, 0);
     let archived_receipt = receipts::create(
         &mut connection,
         receipt_input(&archived_customer.id, "100", "IQD"),
