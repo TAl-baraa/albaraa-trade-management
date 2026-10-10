@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -6,9 +6,26 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tauri::{AppHandle, Manager, WebviewWindow};
+use unicode_normalization::UnicodeNormalization;
 
-const PDF_PREFIX: &str = "كشف حساب - ";
+const PDF_PREFIX: &str = "مكتب البراء - ";
 const PDF_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum StatementCurrency {
+    Iqd,
+    Usd,
+}
+
+impl StatementCurrency {
+    fn arabic_label(self) -> &'static str {
+        match self {
+            Self::Iqd => "دينار",
+            Self::Usd => "دولار",
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,7 +39,7 @@ pub struct StatementPdf {
 fn sanitized_customer_name(name: &str) -> String {
     let sanitized: String = name
         .trim()
-        .chars()
+        .nfc()
         .map(|character| {
             if character.is_control()
                 || matches!(
@@ -45,8 +62,12 @@ fn sanitized_customer_name(name: &str) -> String {
     }
 }
 
-fn pdf_file_name(customer_name: &str) -> String {
-    format!("{PDF_PREFIX}{}.pdf", sanitized_customer_name(customer_name))
+fn pdf_file_name(customer_name: &str, currency: StatementCurrency) -> String {
+    format!(
+        "{PDF_PREFIX}{} - كشف حساب {}.pdf",
+        sanitized_customer_name(customer_name),
+        currency.arabic_label()
+    )
 }
 
 fn cleanup_old_statement_pdfs(directory: &Path, now: SystemTime) -> Result<(), String> {
@@ -228,6 +249,7 @@ pub async fn share_statement_pdf(
     app: AppHandle,
     window: WebviewWindow,
     customer_name: String,
+    currency: StatementCurrency,
 ) -> Result<StatementPdf, String> {
     let directory = app
         .path()
@@ -237,7 +259,7 @@ pub async fn share_statement_pdf(
     fs::create_dir_all(&directory)
         .map_err(|_| "تعذر إنشاء مجلد ملفات كشوف الحساب المؤقتة.".to_string())?;
     cleanup_old_statement_pdfs(&directory, SystemTime::now())?;
-    let file_name = pdf_file_name(&customer_name);
+    let file_name = pdf_file_name(&customer_name, currency);
     let path = directory.join(&file_name);
     if path.exists() {
         fs::remove_file(&path).map_err(|_| {
@@ -260,12 +282,42 @@ mod tests {
     use super::*;
     #[test]
     fn creates_safe_customer_statement_file_names() {
-        assert_eq!(pdf_file_name(" أحمد محمد "), "كشف حساب - أحمد محمد.pdf");
         assert_eq!(
-            pdf_file_name("أحمد<>:\"/\\|?* محمد."),
-            "كشف حساب - أحمد--------- محمد.pdf"
+            pdf_file_name(" أحمد محمد ", StatementCurrency::Iqd),
+            "مكتب البراء - أحمد محمد - كشف حساب دينار.pdf"
         );
-        assert_eq!(pdf_file_name("..."), "كشف حساب - زبون.pdf");
+        assert_eq!(
+            pdf_file_name("John Smith", StatementCurrency::Usd),
+            "مكتب البراء - John Smith - كشف حساب دولار.pdf"
+        );
+        assert_eq!(
+            pdf_file_name("أحمد<>:\"/\\|?* محمد.", StatementCurrency::Iqd),
+            "مكتب البراء - أحمد--------- محمد - كشف حساب دينار.pdf"
+        );
+        assert_eq!(
+            pdf_file_name("ا\u{654}حمد", StatementCurrency::Usd),
+            "مكتب البراء - أحمد - كشف حساب دولار.pdf"
+        );
+        assert_eq!(
+            pdf_file_name("...", StatementCurrency::Iqd),
+            "مكتب البراء - زبون - كشف حساب دينار.pdf"
+        );
+    }
+
+    #[test]
+    fn preserves_unicode_in_statement_file_name_on_disk() {
+        let directory = std::env::temp_dir().join(format!(
+            "albaraa-statement-unicode-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let file_name = pdf_file_name("أحمد محمد", StatementCurrency::Iqd);
+        let path = directory.join(&file_name);
+        fs::write(&path, b"test").unwrap();
+
+        assert_eq!(path.file_name().unwrap().to_str().unwrap(), file_name);
+        assert!(path.exists());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -292,7 +344,7 @@ mod tests {
             std::process::id()
         ));
         fs::create_dir_all(&directory).unwrap();
-        let statement = directory.join("كشف حساب - قديم.pdf");
+        let statement = directory.join("مكتب البراء - قديم - كشف حساب دينار.pdf");
         let unrelated = directory.join("keep.pdf");
         fs::write(&statement, b"old").unwrap();
         fs::write(&unrelated, b"keep").unwrap();

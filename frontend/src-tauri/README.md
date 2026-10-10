@@ -250,9 +250,10 @@ PDF through WebView2 `PrintToPdf`, then attaches only that PDF to the native Win
 Share Sheet through `IDataTransferManagerInterop`. The application does not use a
 WhatsApp API, select a recipient, upload the statement, or expose the SQLite file.
 
-Statement files are named `كشف حساب - <customer>.pdf` after removing Windows-invalid
-filename characters. They are written below the Tauri application cache directory
-in `statement-pdfs`; only matching statement PDFs older than 24 hours are removed.
+Statement files are named `مكتب البراء - <customer> - كشف حساب <currency>.pdf` after
+removing Windows-invalid filename characters while preserving Unicode. They are written
+below the Tauri application cache directory in `statement-pdfs`; only matching statement
+PDFs older than 24 hours are removed.
 If the Windows Share Sheet cannot open, the generated PDF is opened with the system
 PDF application so the user can save or share it manually. WhatsApp appears only
 when Windows exposes it as an installed share target.

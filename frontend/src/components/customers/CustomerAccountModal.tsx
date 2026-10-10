@@ -85,7 +85,7 @@ export function CustomerAccountModal({ customer: initialCustomer, onClose, onCha
     setSharingStatement(true); setToast(null)
     try {
       await document.fonts.ready
-      const pdf = await statementPdfRepository.share(customer.name)
+      const pdf = await statementPdfRepository.share(customer.name, currency)
       if (!pdf.shareOpened) {
         await statementPdfRepository.open(pdf.path)
         setToast(`${pdf.warning ?? 'نافذة مشاركة Windows غير متاحة.'} تم فتح ملف PDF ويمكنك حفظه أو مشاركته يدويًا.`)
