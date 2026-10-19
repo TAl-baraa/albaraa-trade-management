@@ -7,12 +7,15 @@ import { repositoryError } from '../repositories/tauriBridge'
 import { ConfirmationModal } from '../components/customers/ConfirmationModal'
 import { CustomerDetailsModal } from '../components/customers/CustomerDetailsModal'
 import { CustomerAccountModal } from '../components/customers/CustomerAccountModal'
+import { CustomerBalanceReportDialog } from '../components/customers/CustomerBalanceReportDialog'
+import { CustomerStatementsExportDialog } from '../components/customers/CustomerStatementsExportDialog'
 import { CustomerFormModal } from '../components/customers/CustomerFormModal'
 import { CustomerList } from '../components/customers/CustomerList'
 import { PrintableCustomerBalancesReport } from '../components/customers/PrintableCustomerBalancesReport'
 import { SummaryCard } from '../components/customers/SummaryCard'
 import { Toast } from '../components/customers/Toast'
 import { customerRepository } from '../repositories/customerRepository'
+import type { CustomerBalanceReportFilter } from '../services/customerBalancesReport'
 import type { Customer, CustomerFormValues } from '../types/customer'
 import { formatNumber } from '../utils/formatters'
 
@@ -29,15 +32,18 @@ export function CustomersPage() {
   const [formCustomer, setFormCustomer] = useState<Customer | null | undefined>(undefined)
   const [confirmation, setConfirmation] = useState<ConfirmationAction | null>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const [printingBalances, setPrintingBalances] = useState(false)
+  const [balanceReportDialogOpen, setBalanceReportDialogOpen] = useState(false)
+  const [statementExportDialogOpen, setStatementExportDialogOpen] = useState(false)
+  const [printingBalances, setPrintingBalances] = useState<CustomerBalanceReportFilter | null>(null)
   const activeCustomers = useMemo(() => customers.filter((customer) => !customer.isArchived), [customers])
   const visibleCustomers = useMemo(() => { const term = search.trim().toLocaleLowerCase('ar'); return customers.filter((customer) => customer.isArchived === (view === 'archived') && (!term || customer.name.toLocaleLowerCase('ar').includes(term) || customer.phone.includes(term))) }, [customers, search, view])
   const totals = useMemo(() => activeCustomers.reduce((result, customer) => ({ iqdOwedToUs: result.iqdOwedToUs + Math.max(customer.iqdBalance, 0), iqdWeOwe: result.iqdWeOwe + Math.abs(Math.min(customer.iqdBalance, 0)), usdOwedToUs: result.usdOwedToUs + Math.max(customer.usdBalance, 0), usdWeOwe: result.usdWeOwe + Math.abs(Math.min(customer.usdBalance, 0)) }), { iqdOwedToUs: 0, iqdWeOwe: 0, usdOwedToUs: 0, usdWeOwe: 0 }), [activeCustomers])
-  const printBalances = () => {
-    setPrintingBalances(true)
+  const printBalances = (filter: CustomerBalanceReportFilter) => {
+    setBalanceReportDialogOpen(false)
+    setPrintingBalances(filter)
     requestAnimationFrame(() => requestAnimationFrame(() => {
       window.print()
-      setPrintingBalances(false)
+      setPrintingBalances(null)
     }))
   }
   const saveCustomer = async (values: CustomerFormValues) => {
@@ -70,9 +76,9 @@ export function CustomersPage() {
     finally { setBusy(false) }
   }
   const content = confirmation ? { archive: { title: 'تأكيد أرشفة الزبون', message: `سيُخفى حساب ${confirmation.customer.name} من قائمة الزبائن النشطين مع الحفاظ على جميع بياناته.`, label: 'أرشفة الزبون' }, delete: { title: 'تأكيد الحذف النهائي', message: `سيُحذف حساب ${confirmation.customer.name} نهائيًا لأنه بلا رصيد ولا سجل معاملات. لا يمكن التراجع عن هذا الإجراء.`, label: 'حذف نهائي' }, reactivate: { title: 'تأكيد إعادة التفعيل', message: `سيعود حساب ${confirmation.customer.name} إلى قائمة الزبائن النشطين مع الحفاظ على بياناته.`, label: 'إعادة التفعيل' } }[confirmation.type] : null
-  return <><div className="page-container"><header className="page-header"><div><span className="eyebrow">قسم المبيعات</span><h1>إدارة الزبائن</h1><p>إضافة الزبائن ومتابعة أرصدتهم وحالة حساباتهم</p></div><div className="page-header__actions"><button className="button button--secondary" type="button" disabled={loading || Boolean(error) || busy || printingBalances} onClick={printBalances}><Printer size={19} />طباعة أرصدة الزبائن</button><button className="button button--primary" type="button" disabled={loading || Boolean(error) || busy} onClick={() => setFormCustomer(null)}><Plus size={19} />إضافة زبون</button></div></header>
+  return <><div className="page-container"><header className="page-header"><div><span className="eyebrow">قسم المبيعات</span><h1>إدارة الزبائن</h1><p>إضافة الزبائن ومتابعة أرصدتهم وحالة حساباتهم</p></div><div className="page-header__actions"><button className="button button--secondary" type="button" disabled={loading || Boolean(error) || busy || printingBalances !== null} onClick={() => setStatementExportDialogOpen(true)}><Printer size={19} />طباعة كشوفات الزبائن</button><button className="button button--secondary" type="button" disabled={loading || Boolean(error) || busy || printingBalances !== null} onClick={() => setBalanceReportDialogOpen(true)}><Printer size={19} />طباعة أرصدة الزبائن</button><button className="button button--primary" type="button" disabled={loading || Boolean(error) || busy} onClick={() => setFormCustomer(null)}><Plus size={19} />إضافة زبون</button></div></header>
     <section className="summary-grid" aria-label="ملخص حسابات الزبائن"><SummaryCard label="الزبائن النشطون" value={formatNumber(activeCustomers.length)} icon={Users} /><SummaryCard label="لنا بالدينار" value={`${formatNumber(totals.iqdOwedToUs)} د.ع`} icon={Coins} tone="debt" /><SummaryCard label="علينا بالدينار" value={`${formatNumber(totals.iqdWeOwe)} د.ع`} icon={Coins} tone="credit" /><SummaryCard label="لنا بالدولار" value={`${formatNumber(totals.usdOwedToUs)} دولار`} icon={CircleDollarSign} tone="debt" /><SummaryCard label="علينا بالدولار" value={`${formatNumber(totals.usdWeOwe)} دولار`} icon={CircleDollarSign} tone="credit" /></section>
     <section className="customers-panel"><div className="toolbar"><div className="view-switch" role="group" aria-label="حالة الزبائن"><button type="button" className={view === 'active' ? 'active' : ''} onClick={() => { setView('active'); setSearch('') }}><Users size={17} />الزبائن النشطون</button><button type="button" className={view === 'archived' ? 'active' : ''} onClick={() => { setView('archived'); setSearch('') }}><Archive size={17} />الزبائن المؤرشفون</button></div><label className="search-field"><span className="visually-hidden">البحث عن زبون</span><Search size={19} /><input type="search" placeholder="ابحث بالاسم أو رقم الهاتف" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button type="button" onClick={() => setSearch('')} aria-label="مسح البحث"><X size={17} /></button>}</label></div><RepositoryStatus loading={loading} error={error} onRetry={() => void reload()} /><CustomerList customers={visibleCustomers} archived={view === 'archived'} onOpen={setDetailsCustomer} onEdit={setFormCustomer} onArchive={(customer) => setConfirmation({ type: 'archive', customer })} onDelete={(customer) => setConfirmation({ type: 'delete', customer })} onReactivate={(customer) => setConfirmation({ type: 'reactivate', customer })} /></section>
-    {detailsCustomer && <CustomerDetailsModal customer={customers.find((customer) => customer.id === detailsCustomer.id) ?? detailsCustomer} onAccount={() => { setAccountCustomer(detailsCustomer); setDetailsCustomer(null) }} onClose={() => setDetailsCustomer(null)} />}{accountCustomer && <CustomerAccountModal customer={customers.find((customer) => customer.id === accountCustomer.id) ?? accountCustomer} onChanged={() => void reload()} onClose={() => setAccountCustomer(null)} />}{formCustomer !== undefined && <CustomerFormModal customer={formCustomer} onClose={() => { if (!busy) setFormCustomer(undefined) }} onSubmit={saveCustomer} busy={busy} />}{confirmation && content && <ConfirmationModal title={content.title} message={content.message} confirmLabel={content.label} destructive={confirmation.type === 'delete'} onConfirm={completeConfirmation} busy={busy} onClose={() => { if (!busy) setConfirmation(null) }} />}{toast && <Toast message={toast} onClose={() => setToast(null)} />}
-  </div>{printingBalances && createPortal(<div className="print-only-source"><PrintableCustomerBalancesReport customers={activeCustomers} /></div>, document.body)}</>
+    {detailsCustomer && <CustomerDetailsModal customer={customers.find((customer) => customer.id === detailsCustomer.id) ?? detailsCustomer} onAccount={() => { setAccountCustomer(detailsCustomer); setDetailsCustomer(null) }} onClose={() => setDetailsCustomer(null)} />}{accountCustomer && <CustomerAccountModal customer={customers.find((customer) => customer.id === accountCustomer.id) ?? accountCustomer} onChanged={() => void reload()} onClose={() => setAccountCustomer(null)} />}{formCustomer !== undefined && <CustomerFormModal customer={formCustomer} onClose={() => { if (!busy) setFormCustomer(undefined) }} onSubmit={saveCustomer} busy={busy} />}{confirmation && content && <ConfirmationModal title={content.title} message={content.message} confirmLabel={content.label} destructive={confirmation.type === 'delete'} onConfirm={completeConfirmation} busy={busy} onClose={() => { if (!busy) setConfirmation(null) }} />}{balanceReportDialogOpen && <CustomerBalanceReportDialog onConfirm={printBalances} onClose={() => setBalanceReportDialogOpen(false)} />}{statementExportDialogOpen && <CustomerStatementsExportDialog customers={customers} onClose={() => setStatementExportDialogOpen(false)} />}{toast && <Toast message={toast} onClose={() => setToast(null)} />}
+  </div>{printingBalances !== null && createPortal(<div className="print-only-source"><PrintableCustomerBalancesReport customers={activeCustomers} filter={printingBalances} /></div>, document.body)}</>
 }

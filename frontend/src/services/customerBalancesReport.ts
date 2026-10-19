@@ -8,14 +8,16 @@ export interface CustomerBalanceReportRow {
   usdBalance: string
 }
 
+export type CustomerBalanceReportFilter = 'all' | 'debtors'
+
 export const formatReportBalance = (balance: number): string => {
   if (balance === 0) return '0'
   return `${balance > 0 ? 'عليه' : 'له'} ${formatNumber(Math.abs(balance))}`
 }
 
-export const buildCustomerBalanceReportRows = (customers: Customer[]): CustomerBalanceReportRow[] =>
+export const buildCustomerBalanceReportRows = (customers: Customer[], filter: CustomerBalanceReportFilter = 'all'): CustomerBalanceReportRow[] =>
   customers
-    .filter((customer) => !customer.isArchived)
+    .filter((customer) => !customer.isArchived && (filter === 'all' || customer.iqdBalance > 0 || customer.usdBalance > 0))
     .map((customer) => ({
       id: customer.id,
       name: customer.name,

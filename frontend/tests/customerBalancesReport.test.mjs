@@ -43,6 +43,35 @@ test('includes every active customer and excludes archived customers', () => {
   assert.deepEqual(buildCustomerBalanceReportRows([]), [])
 })
 
+test('filters debtors using positive IQD or USD balances without offsetting currencies', () => {
+  const customers = [
+    customer({ id: 'settled' }),
+    customer({ id: 'iqd-debt', iqdBalance: 100 }),
+    customer({ id: 'usd-debt', usdBalance: 25 }),
+    customer({ id: 'mixed', iqdBalance: 50, usdBalance: -200 }),
+    customer({ id: 'credit-only', iqdBalance: -10, usdBalance: -20 }),
+    customer({ id: 'archived-debtor', iqdBalance: 500, isArchived: true, archivedAt: '2026-10-09T00:00:00Z' }),
+  ]
+
+  const rows = buildCustomerBalanceReportRows(customers, 'debtors')
+  assert.deepEqual(rows.map((row) => row.id), ['iqd-debt', 'usd-debt', 'mixed'])
+  assert.deepEqual(rows.find((row) => row.id === 'mixed'), {
+    id: 'mixed',
+    name: 'زبون اختبار',
+    iqdBalance: 'عليه 50',
+    usdBalance: 'له 200',
+  })
+})
+
+test('returns an accurate empty result when no active customers owe the office', () => {
+  const customers = [
+    customer({ id: 'settled' }),
+    customer({ id: 'credit', iqdBalance: -50 }),
+    customer({ id: 'archived-debtor', usdBalance: 10, isArchived: true, archivedAt: '2026-10-09T00:00:00Z' }),
+  ]
+  assert.equal(buildCustomerBalanceReportRows(customers, 'debtors').length, 0)
+})
+
 test('keeps long active-customer lists complete for paginated rendering', () => {
   const customers = Array.from({ length: 120 }, (_, index) => customer({ id: `customer-${index}`, name: `زبون ${index + 1}` }))
   assert.equal(buildCustomerBalanceReportRows(customers).length, 120)

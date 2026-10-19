@@ -1,17 +1,24 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
+    collections::HashMap,
+    fs::{self, OpenOptions},
+    io,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc,
+    },
     time::{Duration, SystemTime},
 };
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 use unicode_normalization::UnicodeNormalization;
 
 const PDF_PREFIX: &str = "مكتب البراء - ";
 const PDF_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum StatementCurrency {
     Iqd,
@@ -34,6 +41,60 @@ pub struct StatementPdf {
     pub path: String,
     pub share_opened: bool,
     pub warning: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatementExportBatch {
+    pub batch_id: String,
+    pub folder_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchStatementPdf {
+    pub file_name: String,
+    pub path: String,
+}
+
+#[derive(Default)]
+pub struct StatementExportState {
+    directories: Mutex<HashMap<String, PathBuf>>,
+    pdf_in_progress: Arc<AtomicBool>,
+}
+
+struct PdfGenerationPermit(Arc<AtomicBool>);
+
+impl Drop for PdfGenerationPermit {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+impl StatementExportState {
+    fn acquire_pdf_permit(&self) -> Result<PdfGenerationPermit, String> {
+        self.pdf_in_progress
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| PdfGenerationPermit(self.pdf_in_progress.clone()))
+            .map_err(|_| "يجري إنشاء ملف PDF آخر حاليًا. انتظر اكتماله ثم أعد المحاولة.".into())
+    }
+
+    fn directory(&self, batch_id: &str) -> Result<PathBuf, String> {
+        self.directories
+            .lock()
+            .map_err(|_| "تعذر الوصول إلى جلسات تصدير كشوف الحساب.".to_string())?
+            .get(batch_id)
+            .cloned()
+            .ok_or_else(|| "دفعة تصدير كشوف الحساب غير معروفة أو تم إنهاؤها.".to_string())
+    }
+
+    fn finish(&self, batch_id: &str) -> Result<PathBuf, String> {
+        self.directories
+            .lock()
+            .map_err(|_| "تعذر الوصول إلى جلسات تصدير كشوف الحساب.".to_string())?
+            .remove(batch_id)
+            .ok_or_else(|| "دفعة تصدير كشوف الحساب غير معروفة أو تم إنهاؤها.".to_string())
+    }
 }
 
 fn sanitized_customer_name(name: &str) -> String {
@@ -68,6 +129,110 @@ fn pdf_file_name(customer_name: &str, currency: StatementCurrency) -> String {
         sanitized_customer_name(customer_name),
         currency.arabic_label()
     )
+}
+
+fn unique_token() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let counter = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{:x}-{:x}", std::process::id(), nanos, counter)
+}
+
+#[cfg(windows)]
+fn local_calendar_date() -> String {
+    use windows::Win32::System::SystemInformation::GetLocalTime;
+    let local = unsafe { GetLocalTime() };
+    format!("{:04}-{:02}-{:02}", local.wYear, local.wMonth, local.wDay)
+}
+
+#[cfg(not(windows))]
+fn local_calendar_date() -> String {
+    let days = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / 86_400;
+    let (year, month, day) = civil_date_from_days(days as i64);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+#[cfg(not(windows))]
+fn civil_date_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
+    let days = days_since_epoch + 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += if month <= 2 { 1 } else { 0 };
+    (year, month, day)
+}
+
+fn create_batch_directory(desktop: &Path, date: &str) -> Result<PathBuf, String> {
+    for sequence in 1..=10_000 {
+        let folder_name = if sequence == 1 {
+            date.to_string()
+        } else {
+            format!("{date} ({sequence})")
+        };
+        let path = desktop.join(folder_name);
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "تعذر إنشاء مجلد تصدير كشوف الحساب على سطح المكتب: {error}"
+                ));
+            }
+        }
+    }
+    Err("تعذر إنشاء مجلد تصدير جديد بسبب كثرة المجلدات الموجودة لهذا اليوم.".into())
+}
+
+fn collision_file_name(base_name: &str, sequence: usize) -> String {
+    if sequence == 1 {
+        return base_name.to_string();
+    }
+    let stem = base_name.strip_suffix(".pdf").unwrap_or(base_name);
+    format!("{stem} ({sequence}).pdf")
+}
+
+fn persist_pdf_without_overwrite(
+    temporary_path: &Path,
+    directory: &Path,
+    base_name: &str,
+) -> Result<(String, PathBuf), String> {
+    for sequence in 1..=10_000 {
+        let file_name = collision_file_name(base_name, sequence);
+        let final_path = directory.join(&file_name);
+        let mut destination = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&final_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("تعذر إنشاء ملف كشف الحساب: {error}")),
+        };
+        let copy_result = (|| {
+            let mut source = fs::File::open(temporary_path)?;
+            io::copy(&mut source, &mut destination)?;
+            destination.sync_all()
+        })();
+        if let Err(error) = copy_result {
+            drop(destination);
+            let _ = fs::remove_file(&final_path);
+            return Err(format!("تعذر حفظ ملف كشف الحساب: {error}"));
+        }
+        return Ok((file_name, final_path));
+    }
+    Err("تعذر اختيار اسم غير مستخدم لملف كشف الحساب.".into())
 }
 
 fn cleanup_old_statement_pdfs(directory: &Path, now: SystemTime) -> Result<(), String> {
@@ -248,9 +413,11 @@ async fn print_webview_to_pdf(_window: WebviewWindow, _path: PathBuf) -> Result<
 pub async fn share_statement_pdf(
     app: AppHandle,
     window: WebviewWindow,
+    state: State<'_, StatementExportState>,
     customer_name: String,
     currency: StatementCurrency,
 ) -> Result<StatementPdf, String> {
+    let _permit = state.acquire_pdf_permit()?;
     let directory = app
         .path()
         .app_cache_dir()
@@ -277,9 +444,93 @@ pub async fn share_statement_pdf(
     })
 }
 
+#[tauri::command]
+pub fn create_statement_export_batch(
+    app: AppHandle,
+    state: State<'_, StatementExportState>,
+) -> Result<StatementExportBatch, String> {
+    let desktop = app
+        .path()
+        .desktop_dir()
+        .map_err(|_| "تعذر الوصول إلى مجلد سطح المكتب للمستخدم الحالي.".to_string())?;
+    let mut directories = state
+        .directories
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى جلسات تصدير كشوف الحساب.".to_string())?;
+    let directory = create_batch_directory(&desktop, &local_calendar_date())?;
+    let batch_id = loop {
+        let candidate = unique_token();
+        if !directories.contains_key(&candidate) {
+            break candidate;
+        }
+    };
+    directories.insert(batch_id.clone(), directory.clone());
+    Ok(StatementExportBatch {
+        batch_id,
+        folder_path: directory.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+pub async fn export_statement_pdf_to_batch(
+    window: WebviewWindow,
+    state: State<'_, StatementExportState>,
+    batch_id: String,
+    customer_name: String,
+    currency: StatementCurrency,
+) -> Result<BatchStatementPdf, String> {
+    let directory = state.directory(&batch_id)?;
+    let _permit = state.acquire_pdf_permit()?;
+    let temporary_path = directory.join(format!(".albaraa-statement-{}.pdf", unique_token()));
+    let print_result = print_webview_to_pdf(window, temporary_path.clone()).await;
+    if let Err(error) = print_result {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(error);
+    }
+    validate_pdf(&temporary_path)?;
+    let base_name = pdf_file_name(&customer_name, currency);
+    let persisted = persist_pdf_without_overwrite(&temporary_path, &directory, &base_name);
+    let _ = fs::remove_file(&temporary_path);
+    let (file_name, path) = persisted?;
+    Ok(BatchStatementPdf {
+        file_name,
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+pub fn finish_statement_export_batch(
+    state: State<'_, StatementExportState>,
+    batch_id: String,
+) -> Result<StatementExportBatch, String> {
+    let _permit = state.acquire_pdf_permit()?;
+    let directory = state.finish(&batch_id)?;
+    Ok(StatementExportBatch {
+        batch_id,
+        folder_path: directory.to_string_lossy().into_owned(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_directory(label: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "albaraa-statement-{label}-{}-{}",
+            std::process::id(),
+            unique_token()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    fn valid_pdf_fixture(path: &Path) {
+        let mut content = b"%PDF-1.7\n".to_vec();
+        content.resize(128, b'0');
+        fs::write(path, content).unwrap();
+    }
+
     #[test]
     fn creates_safe_customer_statement_file_names() {
         assert_eq!(
@@ -356,5 +607,119 @@ mod tests {
         assert!(!statement.exists());
         assert!(unrelated.exists());
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn creates_date_named_batch_directories_without_reusing_existing_folders() {
+        let desktop = test_directory("batch-folders");
+        let first = create_batch_directory(&desktop, "2026-10-19").unwrap();
+        let second = create_batch_directory(&desktop, "2026-10-19").unwrap();
+        let third = create_batch_directory(&desktop, "2026-10-19").unwrap();
+        assert_eq!(first.file_name().unwrap(), "2026-10-19");
+        assert_eq!(second.file_name().unwrap(), "2026-10-19 (2)");
+        assert_eq!(third.file_name().unwrap(), "2026-10-19 (3)");
+        fs::remove_dir_all(desktop).unwrap();
+    }
+
+    #[test]
+    fn preserves_existing_pdfs_and_suffixes_duplicate_customer_file_names() {
+        let directory = test_directory("file-collisions");
+        let base_name = pdf_file_name("أحمد محمد", StatementCurrency::Iqd);
+        let first_source = directory.join("first.tmp");
+        valid_pdf_fixture(&first_source);
+        let (first_name, first_path) =
+            persist_pdf_without_overwrite(&first_source, &directory, &base_name).unwrap();
+        let first_bytes = fs::read(&first_path).unwrap();
+
+        let second_source = directory.join("second.tmp");
+        valid_pdf_fixture(&second_source);
+        let (second_name, second_path) =
+            persist_pdf_without_overwrite(&second_source, &directory, &base_name).unwrap();
+
+        assert_eq!(first_name, base_name);
+        assert!(second_name.ends_with(" (2).pdf"));
+        assert_ne!(first_path, second_path);
+        assert_eq!(fs::read(first_path).unwrap(), first_bytes);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn sanitized_names_cannot_escape_the_batch_directory() {
+        let directory = test_directory("path-safety");
+        let file_name = pdf_file_name("../../عميل\\خاص", StatementCurrency::Usd);
+        let source = directory.join("source.tmp");
+        valid_pdf_fixture(&source);
+        let (_, path) = persist_pdf_without_overwrite(&source, &directory, &file_name).unwrap();
+        assert_eq!(path.parent(), Some(directory.as_path()));
+        assert!(!file_name.contains('/'));
+        assert!(!file_name.contains('\\'));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_pdf_validation_does_not_remove_previous_successes() {
+        let directory = test_directory("partial-failure");
+        let successful = directory.join("successful.pdf");
+        valid_pdf_fixture(&successful);
+        let invalid = directory.join("invalid.pdf");
+        fs::write(&invalid, b"invalid").unwrap();
+
+        assert!(validate_pdf(&invalid).is_err());
+        assert!(!invalid.exists());
+        assert!(successful.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rejects_unknown_and_finished_batch_identifiers() {
+        let state = StatementExportState::default();
+        assert!(state.directory("unknown").is_err());
+        assert!(state.finish("unknown").is_err());
+
+        let directory = test_directory("batch-state");
+        state
+            .directories
+            .lock()
+            .unwrap()
+            .insert("batch-id".into(), directory.clone());
+        assert_eq!(state.finish("batch-id").unwrap(), directory);
+        assert!(state.directory("batch-id").is_err());
+        assert!(state.finish("batch-id").is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn permits_only_one_pdf_generation_at_a_time() {
+        let state = StatementExportState::default();
+        let permit = state.acquire_pdf_permit().unwrap();
+        assert!(state.acquire_pdf_permit().is_err());
+        drop(permit);
+        assert!(state.acquire_pdf_permit().is_ok());
+    }
+
+    #[test]
+    fn serializes_batch_results_with_frontend_field_names() {
+        let batch = StatementExportBatch {
+            batch_id: "opaque-id".into(),
+            folder_path: "C:\\Desktop\\2026-10-19".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(batch).unwrap(),
+            serde_json::json!({
+                "batchId": "opaque-id",
+                "folderPath": "C:\\Desktop\\2026-10-19"
+            })
+        );
+        let pdf = BatchStatementPdf {
+            file_name: "statement.pdf".into(),
+            path: "C:\\Desktop\\2026-10-19\\statement.pdf".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(pdf).unwrap(),
+            serde_json::json!({
+                "fileName": "statement.pdf",
+                "path": "C:\\Desktop\\2026-10-19\\statement.pdf"
+            })
+        );
     }
 }

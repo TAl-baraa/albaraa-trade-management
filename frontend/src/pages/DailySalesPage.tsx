@@ -14,7 +14,7 @@ import { saleRepository } from '../repositories/saleRepository'
 import { salesAccountingService } from '../services/salesAccountingService'
 import type { Sale, SaleFormValues } from '../types/sale'
 import { getLocalDateString, shiftLocalDate } from '../utils/date'
-import { formatDate, formatNumber } from '../utils/formatters'
+import { formatDate, formatNumber, formatWeight } from '../utils/formatters'
 import { buildDriverNameSuggestions } from '../utils/driverNames'
 
 export function DailySalesPage() {
@@ -57,7 +57,7 @@ export function DailySalesPage() {
       <DailyDateNavigation selectedDate={selectedDate} today={today} onChange={changeDate} onPrevious={() => changeDate(shiftLocalDate(selectedDate, -1))} onNext={() => changeDate(shiftLocalDate(selectedDate, 1))} />
       <div className="register-heading"><div><h2>مبيعات يوم {formatDate(selectedDate)}</h2><span>{formatNumber(dailySales.length)} عملية بيع</span></div></div>
       <RepositoryStatus loading={loading || productsLoading || salesLoading} error={error || productsError || salesError} onRetry={() => { void reload(); void reloadProducts(); void reloadSales() }} /><SalesRegister sales={dailySales} customers={customers} products={products} driverNames={driverNames} selectedDate={selectedDate} onCreate={createSale} onUpdate={updateSale} onDelete={setDeletingSale} onHistory={setHistorySale} onReview={toggleReview} />
-      {deletingSale && <DeleteOperationDialog title="تأكيد حذف البيع" description={`سيُحذف بيع ${deletingSale.productNameSnapshot} للمشتري ${deletingSale.customerNameSnapshot} بوزن ${formatNumber(deletingSale.weightTons)} طن وإجمالي ${formatNumber(deletingSale.totalAmount)} ${deletingSale.saleCurrency} بتاريخ ${formatDate(deletingSale.saleDate)}، وسيُعكس أثره من حساب الزبون.`} onConfirm={confirmDelete} onClose={() => setDeletingSale(null)} />}
+      {deletingSale && <DeleteOperationDialog title="تأكيد حذف البيع" description={`سيُحذف بيع ${deletingSale.productNameSnapshot} للمشتري ${deletingSale.customerNameSnapshot} بوزن ${formatWeight(deletingSale.weightTons)} طن وإجمالي ${formatNumber(deletingSale.totalAmount)} ${deletingSale.saleCurrency} بتاريخ ${formatDate(deletingSale.saleDate)}، وسيُعكس أثره من حساب الزبون.`} onConfirm={confirmDelete} onClose={() => setDeletingSale(null)} />}
       {historySale && <OperationHistoryDialog title="سجل تغييرات البيع" history={historySale.history} onClose={() => setHistorySale(null)} />}
       {showDeleted && <DeletedRecordsDialog title="المبيعات المحذوفة" records={sales.filter((sale) => sale.isDeleted).map((record) => ({ kind: 'sale', record }))} onHistory={(record) => { setShowDeleted(false); setHistorySale(record as Sale) }} onClose={() => setShowDeleted(false)} />}
       {toast && <Toast message={toast} onClose={() => setToast(null)} />}

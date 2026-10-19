@@ -34,5 +34,6 @@ windows = { version = "0.62.2", features = [
   "Storage",
   "Storage_Streams",
   "Win32_Foundation",
+  "Win32_System_SystemInformation",
   "Win32_UI_Shell",
 ] }

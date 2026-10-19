@@ -4,7 +4,7 @@ import type { Customer } from '../../types/customer'
 import type { Product } from '../../types/product'
 import type { Sale, SaleFormValues } from '../../types/sale'
 import { isValidDateString } from '../../utils/date'
-import { formatNumber } from '../../utils/formatters'
+import { formatNumber, formatWeight } from '../../utils/formatters'
 import { calculateSaleTotal, isPositiveDecimal } from '../../utils/money'
 import { PredictiveSelector } from './PredictiveSelector'
 import { MoneyInput } from '../common/MoneyInput'
@@ -15,7 +15,7 @@ type FormErrors = Partial<Record<FieldName, string>>
 interface SaleRowEditorProps { customers: Customer[]; products: Product[]; driverNames: string[]; selectedDate: string; sale?: Sale; variant: 'table' | 'card'; onSave: (values: SaleFormValues) => Promise<boolean>; onCancel?: () => void }
 
 const emptyValues = (saleDate: string): SaleFormValues => ({ customerId: '', productId: '', weightTons: '', driverName: '', unitSalePrice: '', saleCurrency: 'IQD', saleDate })
-const valuesFromSale = (sale: Sale): SaleFormValues => ({ customerId: sale.customerId, productId: sale.productId, weightTons: String(sale.weightTons), driverName: sale.driverName, unitSalePrice: String(sale.unitSalePrice), saleCurrency: sale.saleCurrency, saleDate: sale.saleDate })
+const valuesFromSale = (sale: Sale): SaleFormValues => ({ customerId: sale.customerId, productId: sale.productId, weightTons: formatWeight(sale.weightTons), driverName: sale.driverName, unitSalePrice: String(sale.unitSalePrice), saleCurrency: sale.saleCurrency, saleDate: sale.saleDate })
 
 export function SaleRowEditor({ customers, products, driverNames, selectedDate, sale, variant, onSave, onCancel }: SaleRowEditorProps) {
   const weightRef = useRef<HTMLInputElement>(null)

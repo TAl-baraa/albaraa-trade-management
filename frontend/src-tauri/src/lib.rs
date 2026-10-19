@@ -53,7 +53,10 @@ pub fn run() {
             commands::create_transfer,
             commands::update_transfer,
             commands::soft_delete_transfer,
-            statement_pdf::share_statement_pdf
+            statement_pdf::share_statement_pdf,
+            statement_pdf::create_statement_export_batch,
+            statement_pdf::export_statement_pdf_to_batch,
+            statement_pdf::finish_statement_export_batch
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
@@ -66,6 +69,7 @@ pub fn run() {
                 path: directory.clone(),
                 backup_lock: backup_lock.clone(),
             });
+            app.manage(statement_pdf::StatementExportState::default());
             let scheduler_directory = directory.clone();
             thread::Builder::new()
                 .name("automatic-backup-scheduler".into())
