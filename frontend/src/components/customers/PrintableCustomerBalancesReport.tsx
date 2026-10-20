@@ -1,6 +1,6 @@
 import type { Customer } from '../../types/customer'
 import { formatNumber } from '../../utils/formatters'
-import { buildCustomerBalanceReportRows, type CustomerBalanceReportFilter } from '../../services/customerBalancesReport'
+import { buildCustomerBalanceReportRows, calculateCustomerDebtSummary, getCustomerBalanceReportCustomers, type CustomerBalanceReportFilter } from '../../services/customerBalancesReport'
 
 const formatReportDate = (date: Date): string => new Intl.DateTimeFormat('en-GB', {
   day: '2-digit',
@@ -9,7 +9,9 @@ const formatReportDate = (date: Date): string => new Intl.DateTimeFormat('en-GB'
 }).format(date)
 
 export function PrintableCustomerBalancesReport({ customers, filter = 'all', generatedAt = new Date() }: { customers: Customer[]; filter?: CustomerBalanceReportFilter; generatedAt?: Date }) {
-  const rows = buildCustomerBalanceReportRows(customers, filter)
+  const includedCustomers = getCustomerBalanceReportCustomers(customers, filter)
+  const rows = buildCustomerBalanceReportRows(includedCustomers)
+  const summary = calculateCustomerDebtSummary(includedCustomers)
   return <article className="printable-statement printable-balances-report" dir="rtl" aria-label="كشف أرصدة الزبائن">
     <header className="printable-statement__header printable-balances-report__header">
       <h1>كشف أرصدة الزبائن</h1>
@@ -31,5 +33,14 @@ export function PrintableCustomerBalancesReport({ customers, filter = 'all', gen
           </tr>)}
       </tbody>
     </table>
+    <section className="customer-balances-report-summary" aria-label="ملخص إجمالي الديون">
+      <h2>ملخص إجمالي الديون</h2>
+      <dl>
+        <div><dt>مجموع الديون لنا — دينار</dt><dd>{formatNumber(summary.owedToOfficeIqd)}</dd></div>
+        <div><dt>مجموع الديون لنا — دولار</dt><dd>{formatNumber(summary.owedToOfficeUsd)}</dd></div>
+        <div><dt>مجموع الديون علينا — دينار</dt><dd>{formatNumber(summary.owedByOfficeIqd)}</dd></div>
+        <div><dt>مجموع الديون علينا — دولار</dt><dd>{formatNumber(summary.owedByOfficeUsd)}</dd></div>
+      </dl>
+    </section>
   </article>
 }

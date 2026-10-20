@@ -12,6 +12,14 @@ export const isValidDateString = (value: string): boolean => {
   return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
 }
 
+const arabicWeekdays = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'] as const
+
+export const getArabicWeekday = (value: string): string => {
+  if (!isValidDateString(value)) return ''
+  const [year, month, day] = value.split('-').map(Number)
+  return arabicWeekdays[new Date(Date.UTC(year, month - 1, day)).getUTCDay()]
+}
+
 export const shiftLocalDate = (value: string, days: number): string => {
   const [year, month, day] = value.split('-').map(Number)
   const date = new Date(year, month - 1, day)

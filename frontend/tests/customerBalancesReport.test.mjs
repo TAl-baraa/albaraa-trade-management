@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildCustomerBalanceReportRows, formatReportBalance } from '../src/services/customerBalancesReport.ts'
+import { buildCustomerBalanceReportRows, calculateCustomerDebtSummary, formatReportBalance, getCustomerBalanceReportCustomers } from '../src/services/customerBalancesReport.ts'
 
 const customer = (overrides) => ({
   id: 'customer-1',
@@ -75,4 +75,53 @@ test('returns an accurate empty result when no active customers owe the office',
 test('keeps long active-customer lists complete for paginated rendering', () => {
   const customers = Array.from({ length: 120 }, (_, index) => customer({ id: `customer-${index}`, name: `زبون ${index + 1}` }))
   assert.equal(buildCustomerBalanceReportRows(customers).length, 120)
+})
+
+test('calculates sign-separated IQD and USD debt totals without offsetting', () => {
+  const customers = [
+    customer({ id: 'positive-iqd', iqdBalance: 1_250 }),
+    customer({ id: 'negative-iqd', iqdBalance: -300 }),
+    customer({ id: 'positive-usd', usdBalance: 80.5 }),
+    customer({ id: 'negative-usd', usdBalance: -20 }),
+    customer({ id: 'mixed', iqdBalance: 50, usdBalance: -15 }),
+    customer({ id: 'settled' }),
+  ]
+
+  assert.deepEqual(calculateCustomerDebtSummary(customers), {
+    owedToOfficeIqd: 1_300,
+    owedToOfficeUsd: 80.5,
+    owedByOfficeIqd: 300,
+    owedByOfficeUsd: 35,
+  })
+})
+
+test('summarizes only rows included by each report filter', () => {
+  const customers = [
+    customer({ id: 'debtor', iqdBalance: 100, usdBalance: -40 }),
+    customer({ id: 'credit-only', iqdBalance: -25, usdBalance: -10 }),
+    customer({ id: 'settled' }),
+    customer({ id: 'archived', iqdBalance: 500, usdBalance: -200, isArchived: true }),
+  ]
+
+  assert.deepEqual(calculateCustomerDebtSummary(getCustomerBalanceReportCustomers(customers, 'all')), {
+    owedToOfficeIqd: 100,
+    owedToOfficeUsd: 0,
+    owedByOfficeIqd: 25,
+    owedByOfficeUsd: 50,
+  })
+  assert.deepEqual(calculateCustomerDebtSummary(getCustomerBalanceReportCustomers(customers, 'debtors')), {
+    owedToOfficeIqd: 100,
+    owedToOfficeUsd: 0,
+    owedByOfficeIqd: 0,
+    owedByOfficeUsd: 40,
+  })
+})
+
+test('returns zero totals for an empty report', () => {
+  assert.deepEqual(calculateCustomerDebtSummary([]), {
+    owedToOfficeIqd: 0,
+    owedToOfficeUsd: 0,
+    owedByOfficeIqd: 0,
+    owedByOfficeUsd: 0,
+  })
 })
