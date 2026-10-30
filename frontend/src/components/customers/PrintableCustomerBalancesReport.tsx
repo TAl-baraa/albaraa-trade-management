@@ -18,14 +18,14 @@ export function PrintableCustomerBalancesReport({ customers, filter = 'all', gen
       <dl>
         <div><dt>تاريخ التقرير</dt><dd>{formatReportDate(generatedAt)}</dd></div>
         <div><dt>عدد الزبائن</dt><dd>{formatNumber(rows.length)}</dd></div>
-        <div><dt>نطاق التقرير</dt><dd>{filter === 'all' ? 'جميع الزبائن' : 'الزبائن المدينون فقط'}</dd></div>
+        <div><dt>نطاق التقرير</dt><dd>{filter === 'all' ? 'جميع الزبائن' : 'الحسابات ذات الأرصدة'}</dd></div>
       </dl>
     </header>
     <table className="printable-ledger customer-balances-report-table">
       <thead><tr><th>اسم الزبون</th><th>حساب الدينار</th><th>حساب الدولار</th></tr></thead>
       <tbody>
         {rows.length === 0
-          ? <tr><td colSpan={3} className="printable-ledger__empty">{filter === 'all' ? 'لا يوجد زبائن نشطون.' : 'لا يوجد زبائن مدينون.'}</td></tr>
+          ? <tr><td colSpan={3} className="printable-ledger__empty">{filter === 'all' ? 'لا يوجد زبائن نشطون.' : 'لا توجد حسابات ذات أرصدة.'}</td></tr>
           : rows.map((row) => <tr key={row.id}>
             <td>{row.name}</td>
             <td>{row.iqdBalance}</td>

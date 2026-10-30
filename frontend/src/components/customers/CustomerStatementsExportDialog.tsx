@@ -8,6 +8,7 @@ import { repositoryError } from '../../repositories/tauriBridge'
 import { transferRepository } from '../../repositories/transferRepository'
 import { buildStatementExportQueue, runStatementExportQueue, selectAllActiveCustomers, toggleCustomerSelection, validateStatementDateRange, type StatementExportQueueItem, type StatementExportResult } from '../../services/customerStatementBatchExport'
 import type { Customer } from '../../types/customer'
+import { BalanceDisplay } from './BalanceDisplay'
 import { PrintableCustomerStatement } from './PrintableCustomerStatement'
 import { Modal } from './Modal'
 
@@ -110,7 +111,7 @@ export function CustomerStatementsExportDialog({ customers, onClose }: { custome
   const selection = <>
     <div className="statement-export-dates"><label>من<input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label><label>إلى<input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} /></label></div>
     <div className="statement-export-selection"><button type="button" className="statement-export-select-all" onClick={() => setSelectedIds(selectAllActiveCustomers(activeCustomers, !allSelected))}>{allSelected ? <CheckSquare size={18} /> : <Square size={18} />}تحديد الكل</button><span>تم اختيار {selectedIds.size} من {activeCustomers.length}</span></div>
-    <div className="statement-export-customers">{activeCustomers.length === 0 ? <p className="empty-state">لا يوجد زبائن نشطون.</p> : activeCustomers.map((customer) => <label key={customer.id}><input type="checkbox" checked={selectedIds.has(customer.id)} onChange={(event) => setSelectedIds((current) => toggleCustomerSelection(current, customer.id, event.target.checked))} /><span>{customer.name}</span></label>)}</div>
+    <div className="statement-export-customers">{activeCustomers.length === 0 ? <p className="empty-state">لا يوجد زبائن نشطون.</p> : activeCustomers.map((customer) => <label key={customer.id}><input type="checkbox" checked={selectedIds.has(customer.id)} onChange={(event) => setSelectedIds((current) => toggleCustomerSelection(current, customer.id, event.target.checked))} /><span className="statement-export-customer"><strong>{customer.name}</strong><span><span>الدينار:</span><BalanceDisplay balance={customer.iqdBalance} currency="IQD" /></span><span><span>الدولار:</span><BalanceDisplay balance={customer.usdBalance} currency="USD" /></span></span></label>)}</div>
     {message && <p className="field-error">{message}</p>}
     <div className="modal__footer"><button className="button button--secondary" type="button" onClick={onClose}>إلغاء</button><button className="button button--primary" type="button" onClick={() => void startExport()}><Printer size={18} />إنشاء ملفات PDF</button></div>
   </>

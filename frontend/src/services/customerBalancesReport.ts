@@ -15,7 +15,7 @@ export interface CustomerDebtSummary {
   owedByOfficeUsd: number
 }
 
-export type CustomerBalanceReportFilter = 'all' | 'debtors'
+export type CustomerBalanceReportFilter = 'all' | 'with-balances'
 
 export const formatReportBalance = (balance: number): string => {
   if (balance === 0) return '0'
@@ -23,7 +23,7 @@ export const formatReportBalance = (balance: number): string => {
 }
 
 export const getCustomerBalanceReportCustomers = (customers: Customer[], filter: CustomerBalanceReportFilter = 'all'): Customer[] =>
-  customers.filter((customer) => !customer.isArchived && (filter === 'all' || customer.iqdBalance > 0 || customer.usdBalance > 0))
+  customers.filter((customer) => !customer.isArchived && (filter === 'all' || customer.iqdBalance !== 0 || customer.usdBalance !== 0))
 
 export const calculateCustomerDebtSummary = (customers: Customer[]): CustomerDebtSummary =>
   customers.reduce<CustomerDebtSummary>((summary, customer) => ({

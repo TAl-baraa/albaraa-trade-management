@@ -43,7 +43,7 @@ test('includes every active customer and excludes archived customers', () => {
   assert.deepEqual(buildCustomerBalanceReportRows([]), [])
 })
 
-test('filters debtors using positive IQD or USD balances without offsetting currencies', () => {
+test('filters accounts with any non-zero IQD or USD balance without offsetting currencies', () => {
   const customers = [
     customer({ id: 'settled' }),
     customer({ id: 'iqd-debt', iqdBalance: 100 }),
@@ -53,8 +53,8 @@ test('filters debtors using positive IQD or USD balances without offsetting curr
     customer({ id: 'archived-debtor', iqdBalance: 500, isArchived: true, archivedAt: '2026-10-09T00:00:00Z' }),
   ]
 
-  const rows = buildCustomerBalanceReportRows(customers, 'debtors')
-  assert.deepEqual(rows.map((row) => row.id), ['iqd-debt', 'usd-debt', 'mixed'])
+  const rows = buildCustomerBalanceReportRows(customers, 'with-balances')
+  assert.deepEqual(rows.map((row) => row.id), ['iqd-debt', 'usd-debt', 'mixed', 'credit-only'])
   assert.deepEqual(rows.find((row) => row.id === 'mixed'), {
     id: 'mixed',
     name: 'زبون اختبار',
@@ -63,13 +63,12 @@ test('filters debtors using positive IQD or USD balances without offsetting curr
   })
 })
 
-test('returns an accurate empty result when no active customers owe the office', () => {
+test('returns an accurate empty result when all active accounts are settled', () => {
   const customers = [
     customer({ id: 'settled' }),
-    customer({ id: 'credit', iqdBalance: -50 }),
     customer({ id: 'archived-debtor', usdBalance: 10, isArchived: true, archivedAt: '2026-10-09T00:00:00Z' }),
   ]
-  assert.equal(buildCustomerBalanceReportRows(customers, 'debtors').length, 0)
+  assert.equal(buildCustomerBalanceReportRows(customers, 'with-balances').length, 0)
 })
 
 test('keeps long active-customer lists complete for paginated rendering', () => {
@@ -109,11 +108,11 @@ test('summarizes only rows included by each report filter', () => {
     owedByOfficeIqd: 25,
     owedByOfficeUsd: 50,
   })
-  assert.deepEqual(calculateCustomerDebtSummary(getCustomerBalanceReportCustomers(customers, 'debtors')), {
+  assert.deepEqual(calculateCustomerDebtSummary(getCustomerBalanceReportCustomers(customers, 'with-balances')), {
     owedToOfficeIqd: 100,
     owedToOfficeUsd: 0,
-    owedByOfficeIqd: 0,
-    owedByOfficeUsd: 40,
+    owedByOfficeIqd: 25,
+    owedByOfficeUsd: 50,
   })
 })
 

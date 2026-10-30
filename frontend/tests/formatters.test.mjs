@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { formatNumber, formatWeight } from '../src/utils/formatters.ts'
+import { formatBalance, formatNumber, formatWeight } from '../src/utils/formatters.ts'
 import { calculateSaleTotal } from '../src/utils/money.ts'
 
 test('formats sales weights with up to three decimal places', () => {
@@ -23,6 +23,13 @@ test('leaves general number and currency-oriented formatting unchanged', () => {
   assert.equal(formatNumber(6.015), '6.02')
   assert.equal(formatNumber(8.5), '8.5')
   assert.equal(formatNumber(1_234.567), '1,234.57')
+})
+
+test('formats current customer balances with debt, credit, and settled directions', () => {
+  assert.equal(formatBalance(1_250_000, 'IQD'), 'عليه 1,250,000 د.ع')
+  assert.equal(formatBalance(-875.5, 'USD'), 'له 875.5 دولار')
+  assert.equal(formatBalance(0, 'IQD'), 'مسدد')
+  assert.equal(formatBalance(0, 'USD'), 'مسدد')
 })
 
 test('does not change the full weight used for sales calculations', () => {
