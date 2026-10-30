@@ -7,10 +7,11 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc,
     },
     time::{Duration, SystemTime},
 };
+#[cfg(windows)]
+use std::sync::mpsc;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use unicode_normalization::UnicodeNormalization;
 

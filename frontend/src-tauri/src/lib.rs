@@ -59,6 +59,7 @@ pub fn run() {
             statement_pdf::finish_statement_export_batch
         ])
         .setup(|app| {
+            #[cfg(windows)]
             if let Some(window) = app.get_webview_window("main") {
                 window.set_icon(tauri::image::Image::from_app_icon_resource(256)?)?;
             }
